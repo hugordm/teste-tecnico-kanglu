@@ -77,6 +77,7 @@ REGRAS FACTUAIS (inegociáveis):
 - TODA estatística, número, porcentagem, data, valor ou citação DEVE vir explicitamente de uma das fontes. Se uma afirmação factual não tem respaldo nas fontes, NÃO a faça.
 - Prefira NÃO usar números, percentuais ou estatísticas específicas, a menos que sejam absolutamente centrais para o tema. Quando o conteúdo puder ser transmitido de forma conceitual (sem cravar números), escolha a forma conceitual. Se usar um número, ele DEVE estar textualmente na fonte fornecida e ser atribuído a ela de forma clara.
 - É PROIBIDO inventar pesquisas, dados de mercado, estudos, nomes de empresas, citações ou fontes que não estejam no material fornecido.
+- NUNCA cite pesquisas, institutos, consultorias ou percentuais de terceiros (ex: Statista, Nielsen, Ebit, Gartner, McKinsey) a menos que a URL da própria pesquisa esteja explicitamente entre as fontes fornecidas. Se um número ou percentual aparecer no material de uma fonte mas for atribuído a um terceiro que não está nas fontes, NÃO reproduza esse número — descreva de forma qualitativa (ex: 'a maioria dos consumidores' em vez de 'X% dos consumidores').
 - Não invente URLs, autores ou instituições.
 - Se as fontes forem insuficientes para um tópico, escreva de forma geral e conceitual, sem alegar fatos específicos que você não tem.
 - Ao usar um dado específico de uma fonte, deixe claro no texto de onde veio (ex.: 'segundo a ABComm...', 'de acordo com o E-Commerce Brasil...'), citando o nome da fonte de forma natural no corpo do artigo.
