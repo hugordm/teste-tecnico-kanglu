@@ -2,7 +2,12 @@ import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 import { generateUniqueSlug } from "@/lib/validation";
 import { generateDraftWithWebSearch, AiError } from "@/lib/ai";
+import { generateAndUploadArticleImage } from "@/lib/article-image";
 import { z } from "zod";
+
+// O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
+// então fixamos o runtime nodejs (mesmo motivo do /generate-image).
+export const runtime = "nodejs";
 
 /**
  * Entrada do POST /api/articles/generate-auto.
@@ -89,7 +94,7 @@ export async function POST(req: Request) {
 
   const slug = await generateUniqueSlug(draft.suggestedSlug || draft.title);
 
-  const article = await prisma.article.create({
+  let article = await prisma.article.create({
     data: {
       title: draft.title,
       slug,
@@ -111,6 +116,27 @@ export async function POST(req: Request) {
     },
     include: { sources: true },
   });
+
+  // Imagem automática: extra, NUNCA obrigatória. O artigo já está salvo acima;
+  // se a geração/upload da imagem falhar, engolimos o erro (warn) e devolvemos o
+  // artigo sem imagem — o usuário gera depois pelo botão manual. Try/catch
+  // próprio, isolado, pra que uma falha externa jamais derrube a criação.
+  try {
+    const { url, credit } = await generateAndUploadArticleImage(
+      article.id,
+      article.title,
+    );
+    article = await prisma.article.update({
+      where: { id: article.id },
+      data: { ogImage: url, imageCredit: credit },
+      include: { sources: true },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[generate-auto] imagem automática falhou (artigo mantido): ${msg}`,
+    );
+  }
 
   return Response.json({ article }, { status: 201 });
 }

@@ -1,19 +1,12 @@
-import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
-import { generateArticleImage, ImageAiError, IMAGE_CREDIT } from "@/lib/image";
+import { ImageAiError } from "@/lib/image";
+import { generateAndUploadArticleImage } from "@/lib/article-image";
 
 // O upload pro Blob usa o SDK do Node (Buffer), então fixamos o runtime nodejs.
 export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
-
-/** Extensão do arquivo a partir do MIME devolvido pelo modelo (fallback png). */
-function extFromContentType(contentType: string): string {
-  if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
-  if (contentType.includes("webp")) return "webp";
-  return "png";
-}
 
 /**
  * POST /api/articles/[id]/generate-image  (protegido)
@@ -47,15 +40,9 @@ export async function POST(req: Request, { params }: Params) {
   // Isolados no try pra virar 502 amigável em vez de 500 cru — e, crucialmente,
   // o artigo só é tocado no update lá embaixo, depois de tudo dar certo.
   let url: string;
+  let credit: string;
   try {
-    const image = await generateArticleImage(existing.title);
-
-    const blob = await put(
-      `articles/${id}-${Date.now()}.${extFromContentType(image.contentType)}`,
-      image.data,
-      { access: "public", contentType: image.contentType },
-    );
-    url = blob.url;
+    ({ url, credit } = await generateAndUploadArticleImage(id, existing.title));
   } catch (err) {
     if (err instanceof ImageAiError) {
       console.warn(`[generate-image] geração falhou: ${err.message}`);
@@ -74,7 +61,7 @@ export async function POST(req: Request, { params }: Params) {
   // Só aqui tocamos o artigo: URL da imagem em ogImage + crédito do modelo.
   const article = await prisma.article.update({
     where: { id },
-    data: { ogImage: url, imageCredit: IMAGE_CREDIT },
+    data: { ogImage: url, imageCredit: credit },
     include: { sources: true },
   });
 
