@@ -1,26 +1,29 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Tokens da marca Kanglu.
+ * No Tailwind v4 o @theme registra os valores como utilitários: um
+ * --color-kanglu-orange vira automaticamente text-kanglu-orange,
+ * bg-kanglu-orange, border-kanglu-orange, etc. As fontes viram font-heading
+ * e font-body. As variáveis --font-heading/--font-body são preenchidas pelo
+ * next/font no layout (Poppins e Inter), então aqui só as encaminhamos.
+ */
+@theme {
+  --color-kanglu-orange: #ff7047; /* primária: botões, links, destaques */
+  --color-kanglu-bordo: #5e0728; /* títulos e texto forte */
+  --color-kanglu-cream: #f2eae2; /* fundo da página */
+  --color-kanglu-nude: #e5c6bc; /* bordas e divisórias */
+
+  --font-heading: var(--font-poppins);
+  --font-body: var(--font-inter);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/*
+ * Base sóbria do brandguide: fundo creme, texto em bordô, corpo em Inter.
+ * Sem dark-mode aqui — a paleta da marca é fixa (mockups são light).
+ */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-kanglu-cream);
+  color: var(--color-kanglu-bordo);
+  font-family: var(--font-body), system-ui, sans-serif;
 }

@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ArticleStatus {
+  draft
+  in_review
+  published
+  archived      // opcional no escopo — deixei pronto, custa zero
+}
+
+model Article {
+  id              String        @id @default(cuid())
+  title           String
+  slug            String        @unique
+  excerpt         String?
+  content         String        // Markdown
+  status          ArticleStatus @default(draft)
+
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+  canonicalUrl    String?
+  ogImage         String?
+
+  // Imagem (opcional) — crédito obrigatório se houver imagem
+  imageCredit     String?
+  imageSourceUrl  String?
+
+  // Rastreabilidade de IA (exigência de disclaimer do teste)
+  aiAssisted      Boolean       @default(false)
+  aiModel         String?
+
+  publishedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  sources         Source[]
+
+  @@index([status])   // painel admin filtra por status o tempo todo
+}
+
+model Source {
+  id         String   @id @default(cuid())
+  title      String
+  url        String
+  accessedAt DateTime @default(now())
+
+  article    Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  articleId  String
+
+  @@index([articleId])
+}
