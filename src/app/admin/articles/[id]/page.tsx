@@ -43,6 +43,7 @@ export default function EditorPage() {
   const [publishing, setPublishing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [generatingImage, setGeneratingImage] = useState(false);
   const [preview, setPreview] = useState(false);
 
   // Sem setState síncrono: o primeiro setState só acontece após o await (regra
@@ -219,6 +220,38 @@ export default function EditorPage() {
     }
   }
 
+  // Gerar imagem: cria uma ilustração via IA, hospeda no Blob e salva a URL no
+  // artigo (campo ogImage) + o crédito do modelo. Atualiza SÓ os campos de
+  // imagem no estado local — preserva edições de conteúdo ainda não salvas.
+  // Chamar de novo substitui a imagem. Não corrompe o artigo se falhar (502).
+  async function generateImage() {
+    if (!article) return;
+    setGeneratingImage(true);
+    try {
+      const data = await apiFetch<{ article: AdminArticle }>(
+        `/api/articles/${id}/generate-image`,
+        { method: "POST" },
+      );
+      setArticle((prev) =>
+        prev
+          ? {
+              ...prev,
+              ogImage: data.article.ogImage,
+              imageCredit: data.article.imageCredit,
+            }
+          : prev,
+      );
+      set("ogImage", data.article.ogImage ?? "");
+      toast.success("Imagem gerada.");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Não foi possível gerar a imagem.",
+      );
+    } finally {
+      setGeneratingImage(false);
+    }
+  }
+
   // --- Fontes ---
   function addSource() {
     setSources((prev) => [...prev, { title: "", url: "" }]);
@@ -259,7 +292,9 @@ export default function EditorPage() {
   }
 
   const meta = STATUS_META[article.status];
-  const busy = saving || publishing || deleting || regenerating;
+  const busy =
+    saving || publishing || deleting || regenerating || generatingImage;
+  const hasImage = isHttpUrl(form.ogImage);
 
   return (
     <Shell>
@@ -365,6 +400,42 @@ export default function EditorPage() {
               </p>
             )}
           </div>
+
+          {/* Imagem ilustrativa (IA) */}
+          <Section title="Imagem ilustrativa">
+            <p className="text-xs text-kanglu-bordo/50">
+              Gera uma imagem de topo via IA a partir do título. Aparece no topo
+              do artigo publicado, com crédito do modelo. Opcional.
+            </p>
+            {hasImage && (
+              <div className="mt-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={form.ogImage}
+                  alt={`Ilustração do artigo: ${form.title}`}
+                  className="w-full rounded-lg border border-kanglu-nude object-cover"
+                />
+                {article.imageCredit && (
+                  <p className="mt-2 text-xs text-kanglu-bordo/50">
+                    Crédito: {article.imageCredit}
+                  </p>
+                )}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={generateImage}
+              disabled={busy}
+              className="mt-3 rounded-lg border border-kanglu-orange px-4 py-2 text-sm font-semibold text-kanglu-orange transition-colors hover:bg-kanglu-orange/10 disabled:opacity-60"
+              title="Gera uma ilustração por IA e a hospeda para uso no artigo"
+            >
+              {generatingImage
+                ? "Gerando imagem…"
+                : hasImage
+                  ? "Gerar novamente"
+                  : "Gerar imagem"}
+            </button>
+          </Section>
 
           {/* Conteúdo principal */}
           <Section title="Conteúdo">
