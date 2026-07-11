@@ -37,6 +37,29 @@ export const COMPETITOR_DOMAINS: string[] = [
   "layerup.io",
   "fulwood.me",
   "fulwood.com.br",
+
+  // Pagamentos / gateways / checkout
+  "stripe.com",
+  "iugu.com",
+  "pagbrasil.com",
+  "prax.ai",
+  "yavdigital.com",
+  "base.com",
+  "pagseguro.com.br",
+  "pagseguro.uol.com.br",
+  "mercadopago.com.br",
+  "mercadopago.com",
+  "pagar.me",
+
+  // E-commerce / lojas / marketplaces
+  "shopify.com",
+  "vtex.com",
+  "vtex.com.br",
+  "nuvemshop.com.br",
+  "tray.com.br",
+
+  // Vídeo / redes (não é fonte adequada para artigo)
+  "youtube.com",
 ];
 
 /**
