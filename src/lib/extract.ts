@@ -1,5 +1,5 @@
 import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+import { parseHTML } from "linkedom";
 
 // ---------------------------------------------------------------------------
 // Limites — o input vem da internet aberta, então nada aqui é confiável.
@@ -59,10 +59,19 @@ export interface ExtractedSource {
 export async function extractFromUrl(url: string): Promise<ExtractedSource> {
   const html = await fetchHtml(url);
 
-  // `url` no JSDOM é importante: o Readability resolve links/imagens relativos
-  // e alguns sites dependem disso pra achar o conteúdo principal.
-  const dom = new JSDOM(html, { url });
-  const reader = new Readability(dom.window.document);
+  // linkedom no lugar do jsdom: é um parser de DOM leve feito pra serverless.
+  // O jsdom arrasta dependências que fazem `require()` de módulos ESM-only
+  // (html-encoding-sniffer → @exodus/bytes), o que estoura ERR_REQUIRE_ESM no
+  // bundle da Vercel/Turbopack. O linkedom não tem esse problema e entrega um
+  // `document` compatível com o Readability.
+  const { document } = parseHTML(html);
+
+  // O Readability resolve links/imagens relativos a partir do baseURI do
+  // documento; o linkedom não recebe a URL no parse, então injetamos uma
+  // <base> pra manter esse comportamento (e a qualidade da extração).
+  setBaseUrl(document, url);
+
+  const reader = new Readability(document);
   const article = reader.parse();
 
   // Readability devolve null quando não acha um corpo de artigo (ex.: página
@@ -209,6 +218,20 @@ async function readCapped(res: Response, url: string): Promise<string> {
     // Solta a conexão mesmo se a gente abortou no meio pelo teto de tamanho.
     await reader.cancel().catch(() => {});
   }
+}
+
+/**
+ * Injeta uma `<base href>` no documento pra que o `baseURI` aponte pra URL de
+ * origem. O jsdom recebia isso via `new JSDOM(html, { url })`; o linkedom não
+ * tem esse parâmetro, então recriamos o efeito na mão. Sem `<head>` (HTML
+ * malformado), cai fora sem quebrar — o Readability ainda extrai o texto.
+ */
+function setBaseUrl(document: Document, url: string): void {
+  const head = document.head;
+  if (!head) return;
+  const base = document.createElement("base");
+  base.setAttribute("href", url);
+  head.insertBefore(base, head.firstChild);
 }
 
 /** Colapsa espaços/quebras repetidas — Readability deixa muito \n\n\n. */
