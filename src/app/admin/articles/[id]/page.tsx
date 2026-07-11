@@ -42,6 +42,7 @@ export default function EditorPage() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [preview, setPreview] = useState(false);
 
   // Sem setState síncrono: o primeiro setState só acontece após o await (regra
@@ -191,6 +192,33 @@ export default function EditorPage() {
     }
   }
 
+  // Gerar novamente: refaz content/excerpt reusando o mesmo pipeline de geração,
+  // a partir do título + fontes atuais. Sobrescreve o conteúdo do rascunho —
+  // por isso a confirmação. Re-hidrata com o resultado (descarta edições locais
+  // não salvas do conteúdo, que é justamente o "substituir" combinado).
+  async function regenerate() {
+    if (!article) return;
+    if (
+      !confirm("Isso vai substituir o conteúdo atual do rascunho. Continuar?")
+    )
+      return;
+    setRegenerating(true);
+    try {
+      const data = await apiFetch<{ article: AdminArticle }>(
+        `/api/articles/${id}/regenerate`,
+        { method: "POST" },
+      );
+      hydrate(data.article);
+      toast.success("Conteúdo gerado novamente.");
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Não foi possível gerar novamente.",
+      );
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
   // --- Fontes ---
   function addSource() {
     setSources((prev) => [...prev, { title: "", url: "" }]);
@@ -231,7 +259,7 @@ export default function EditorPage() {
   }
 
   const meta = STATUS_META[article.status];
-  const busy = saving || publishing || deleting;
+  const busy = saving || publishing || deleting || regenerating;
 
   return (
     <Shell>
@@ -285,6 +313,17 @@ export default function EditorPage() {
         >
           {preview ? "Editar" : "Prévia"}
         </button>
+        {article.status === "draft" && (
+          <button
+            type="button"
+            onClick={regenerate}
+            disabled={busy}
+            className="rounded-lg border border-kanglu-nude px-4 py-2 text-sm font-medium text-kanglu-bordo transition-colors hover:bg-kanglu-cream disabled:opacity-60"
+            title="Refaz o conteúdo do rascunho a partir do título e das fontes atuais"
+          >
+            {regenerating ? "Gerando…" : "Gerar novamente"}
+          </button>
+        )}
         <button
           type="button"
           onClick={remove}

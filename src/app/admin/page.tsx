@@ -175,6 +175,13 @@ export default function KanbanPage() {
             >
               ✨ Gerar artigo com IA
             </button>
+            <button
+              type="button"
+              onClick={() => router.push("/admin/generate-auto")}
+              className="rounded-lg bg-kanglu-bordo px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-kanglu-bordo/90"
+            >
+              🌐 Gerar por tema (web)
+            </button>
           </div>
         </div>
 

@@ -27,3 +27,20 @@ body {
   color: var(--color-kanglu-bordo);
   font-family: var(--font-body), system-ui, sans-serif;
 }
+
+/*
+ * Cursor de clicável em toda a app (admin + blog). Botões e elementos com
+ * role="button" ou .clickable mostram a mãozinha; desabilitados mostram o
+ * "não permitido". Âncoras (<a>/<Link>) já vêm com pointer do navegador.
+ * Só afeta o cursor — nenhum comportamento muda.
+ */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+.clickable {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
