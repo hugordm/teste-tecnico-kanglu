@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { SiteHeader } from "@/components/site-header";
 import { getPublishedArticles, type PublicArticle } from "@/lib/public-articles";
 
 export const metadata: Metadata = {
@@ -67,22 +68,6 @@ export default async function BlogPage({
         )}
       </main>
     </div>
-  );
-}
-
-/** Cabeçalho simples com a marca Kanglu (logo textual). */
-function SiteHeader() {
-  return (
-    <header className="border-b border-kanglu-nude bg-kanglu-cream">
-      <div className="mx-auto flex w-full max-w-5xl items-center px-5 py-5 sm:px-8">
-        <Link
-          href="/blog"
-          className="font-heading text-2xl font-bold tracking-tight text-kanglu-bordo"
-        >
-          Kanglu<span className="text-kanglu-orange">.</span>
-        </Link>
-      </div>
-    </header>
   );
 }
 

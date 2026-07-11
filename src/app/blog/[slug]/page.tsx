@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ArticleMarkdown } from "@/components/article-markdown";
+import { SiteHeader } from "@/components/site-header";
 import {
   getPublishedArticleBySlug,
   type PublicArticle,
@@ -152,22 +153,6 @@ export default async function ArticlePage({ params }: Props) {
         </article>
       </main>
     </div>
-  );
-}
-
-/** Cabeçalho da marca (idêntico ao da listagem). */
-function SiteHeader() {
-  return (
-    <header className="border-b border-kanglu-nude bg-kanglu-cream">
-      <div className="mx-auto flex w-full max-w-5xl items-center px-5 py-5 sm:px-8">
-        <Link
-          href="/blog"
-          className="font-heading text-2xl font-bold tracking-tight text-kanglu-bordo"
-        >
-          Kanglu<span className="text-kanglu-orange">.</span>
-        </Link>
-      </div>
-    </header>
   );
 }
 
