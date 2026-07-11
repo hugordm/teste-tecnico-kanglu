@@ -2,58 +2,20 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Seed determinístico: cópia fiel dos 3 artigos já revisados e publicados.
-// O conteúdo NÃO é regenerado por IA — é o texto real que está no ar.
+// Seed determinístico: cópia fiel dos 3 artigos que estão publicados no banco.
+// O conteúdo NÃO é regenerado por IA — é o texto real que está no ar, incluindo
+// as imagens (ogImage no Vercel Blob) e o crédito da geração.
 // aiAssisted/aiModel refletem que a redação inicial teve apoio de IA.
 const AI_MODEL = "google/gemini-3.1-flash-lite";
+const IMAGE_CREDIT = "Nano Banana 2 (Gemini) via OpenRouter";
 
 const articles = [
   {
-    title: "A importância do rastreamento de pedidos para o sucesso do seu e-commerce",
-    slug: "importancia-rastreamento-pedidos-ecommerce",
-    excerpt: "Descubra como o rastreamento de pedidos transforma a experiência do cliente, reduz a ansiedade pós-compra e otimiza a gestão logística da sua loja virtual.",
-    content: `## Por que o rastreamento é essencial no e-commerce?
-
-No cenário atual do comércio eletrônico, o rastreamento de encomendas deixou de ser um detalhe operacional para se tornar um diferencial competitivo estratégico. Com a rápida expansão do setor, observada em levantamentos da ABComm, muitos consumidores estão realizando suas primeiras compras online. Para esse público, o acompanhamento do pedido é fundamental para reduzir a ansiedade e transmitir a segurança necessária para fidelizar a compra.
-
-## Benefícios práticos para a sua loja
-
-Manter o cliente informado sobre cada etapa da entrega traz vantagens diretas para o lojista:
-
-*   **Redução da ansiedade do consumidor:** Ao fornecer atualizações constantes, você diminui a insegurança do cliente durante o período de espera.
-*   **Prevenção de reentregas:** Quando o cliente sabe quando o pedido chegará, ele pode se organizar para recebê-lo, evitando tentativas de entrega frustradas que geram custos extras.
-*   **Gestão proativa de problemas:** O rastreamento permite identificar movimentações atípicas, como atrasos ou paradas prolongadas, antes que o cliente perceba. Isso possibilita que você entre em contato primeiro, mantendo a transparência e a credibilidade da marca.
-*   **Adaptação ao digital:** Para novos compradores, o rastreio ajuda a diminuir o choque entre a experiência de compra física e a digital, tornando o processo mais compreensível e confiável.
-
-## Como otimizar o acompanhamento das entregas
-
-Gerenciar o rastreio manualmente, acessando diversos sites de transportadoras, é ineficiente e consome tempo precioso. A recomendação é utilizar plataformas de rastreamento que centralizam as informações de diferentes parceiros logísticos em um único painel.
-
-Além de automatizar o processo, essas ferramentas permitem o envio de notificações automáticas para o cliente. Contudo, você pode ir além: ao enviar o código de rastreio por canais como WhatsApp ou e-mail, você reforça o cuidado da sua marca e mantém o canal de comunicação aberto para eventuais dúvidas.
-
-## Comunicação como aliada
-
-Lembre-se que a comunicação deve ser constante, especialmente em situações imprevistas. Caso ocorra um atraso, informar o cliente proativamente sobre a nova previsão de entrega é uma atitude que favorece a experiência do consumidor, mesmo diante de um contratempo. Ao otimizar o rastreamento, você não apenas melhora a eficiência interna da sua loja, mas também fortalece a reputação digital do seu negócio.`,
-    metaTitle: "A importância do rastreamento de pedidos no e-commerce",
-    metaDescription: "Entenda como o rastreamento de pedidos melhora a experiência do cliente, reduz a ansiedade e ajuda na gestão logística da sua loja virtual.",
-    publishedAt: new Date("2026-07-11T16:48:50.014Z"),
-    sources: [
-      {
-        title: "Entenda a importância do rastreamento de encomendas no e-commerce",
-        url: "https://abcomm.org/noticias/entenda-a-importancia-do-rastreamento-de-encomendas-no-e-commerce/",
-        accessedAt: new Date("2026-07-11T16:48:49.488Z"),
-      },
-      {
-        title: "Como otimizar o rastreamento de encomendas no e-commerce",
-        url: "https://www.ecommercebrasil.com.br/artigos/como-otimizar-o-rastreamento-de-encomendas-no-e-commerce",
-        accessedAt: new Date("2026-07-11T16:48:49.488Z"),
-      },
-    ],
-  },
-  {
-    title: "Como as notificações de status transformam a experiência pós-venda e fidelizam clientes",
+    title:
+      "Como as notificações de status transformam a experiência pós-venda e fidelizam clientes",
     slug: "como-notificacoes-de-status-fidelizam-clientes-no-ecommerce",
-    excerpt: "Descubra como manter seu cliente informado sobre cada etapa da entrega pode reduzir a ansiedade, aumentar a confiança e fortalecer a fidelização no e-commerce.",
+    excerpt:
+      "Descubra como manter seu cliente informado sobre cada etapa da entrega pode reduzir a ansiedade, aumentar a confiança e fortalecer a fidelização no e-commerce.",
     content: `## A importância de manter o cliente informado
 
 No e-commerce, a jornada do cliente não termina no clique do botão de compra. Diferente da loja física, onde a entrega é imediata, o ambiente online exige uma atenção especial à logística. Manter o consumidor munido de informações sobre sua encomenda, desde a finalização do pedido até a chegada em suas mãos, é um diferencial competitivo essencial para qualquer lojista.
@@ -75,46 +37,115 @@ O rastreamento de encomendas é uma ferramenta poderosa para a fidelização. Ao
 
 Lembre-se: em um mercado cada vez mais competitivo, o que diferencia uma loja de sucesso é a capacidade de manter o cliente informado e satisfeito em todas as etapas da jornada, especialmente na fase final da entrega.`,
     metaTitle: "Notificações de status e fidelização no e-commerce | Kanglu",
-    metaDescription: "Saiba como as notificações de status no pós-venda ajudam a reduzir a ansiedade do cliente, aumentar a confiança e fidelizar consumidores no e-commerce.",
+    metaDescription:
+      "Saiba como as notificações de status no pós-venda ajudam a reduzir a ansiedade do cliente, aumentar a confiança e fidelizar consumidores no e-commerce.",
+    ogImage:
+      "https://hn6ldxzrjpr0vrlp.public.blob.vercel-storage.com/articles/cmrgltto60003pgs0r83l5mv0-1783797195651.jpg",
+    imageCredit: IMAGE_CREDIT,
     publishedAt: new Date("2026-07-11T16:50:14.736Z"),
     sources: [
       {
-        title: "Entenda a importância do rastreamento de encomendas no e-commerce",
+        title:
+          "Entenda a importância do rastreamento de encomendas no e-commerce",
         url: "https://abcomm.org/noticias/entenda-a-importancia-do-rastreamento-de-encomendas-no-e-commerce/",
-        accessedAt: new Date("2026-07-11T16:50:14.383Z"),
+        accessedAt: new Date("2026-07-11T19:13:25.296Z"),
       },
     ],
   },
   {
-    title: "Como a experiência pós-compra transforma clientes em compradores recorrentes",
+    title:
+      "Como a experiência pós-compra transforma clientes em compradores recorrentes",
     slug: "experiencia-pos-compra-fidelizacao-ecommerce",
-    excerpt: "Descubra como o acompanhamento estratégico do pós-compra pode reduzir a ansiedade do cliente, aumentar a confiança na sua marca e impulsionar a fidelização.",
-    content: `## O valor do pós-compra no e-commerce
+    excerpt:
+      "Descubra como o acompanhamento transparente de pedidos pode reduzir a ansiedade do consumidor e construir a confiança necessária para fidelizar clientes no e-commerce.",
+    content: `## O poder da experiência pós-compra
 
-No comércio eletrônico, a jornada do cliente não termina no clique final de pagamento. Diferente da compra em uma loja física, onde o processo é imediato, o e-commerce exige uma cadeia logística que demanda atenção constante até que o produto chegue às mãos do consumidor. Segundo a ABComm, o crescimento do setor no Brasil tem atraído milhões de novos compradores, muitos dos quais ainda estão se adaptando a esse modelo de consumo. Proporcionar uma experiência pós-compra transparente é o diferencial que transforma uma entrega comum em uma oportunidade de fidelização.
+No e-commerce, a jornada do cliente não termina no clique final do checkout. Diferente da loja física, onde a transação é imediata, o ambiente digital exige que o lojista gerencie toda uma cadeia logística até que o produto chegue às mãos do consumidor. Segundo a Associação Brasileira de Comércio Eletrônico (ABComm), o setor tem passado por uma expansão acelerada, trazendo milhões de novos consumidores para o digital. Para esses novos usuários, o acompanhamento detalhado da entrega é fundamental para transmitir segurança e confiança.
 
-## Por que o rastreamento é a chave da confiança
+## Por que o rastreamento é um diferencial competitivo?
 
-Manter o cliente informado sobre cada etapa da entrega é uma das formas mais eficazes de construir credibilidade. De acordo com a ABComm, o rastreamento de encomendas desempenha papéis fundamentais para o sucesso do lojista:
+Manter o cliente informado sobre cada etapa da entrega, desde a finalização do pedido até o recebimento, é uma estratégia poderosa para transformar compradores ocasionais em clientes recorrentes. Veja como o rastreio impacta o seu negócio:
 
-*   **Redução da ansiedade:** O consumidor moderno deseja acompanhar cada atualização. Oferecer visibilidade sobre o status do pedido transmite segurança e tranquilidade durante o período de espera.
-*   **Adaptação ao digital:** Para novos compradores, entender o fluxo logístico ajuda a diminuir o choque entre a experiência física e a virtual, tornando o processo mais natural.
-*   **Gestão proativa de problemas:** Monitorar as encomendas permite que o lojista identifique movimentações atípicas ou atrasos antes mesmo que o cliente perceba. Antecipar-se e comunicar o consumidor sobre imprevistos é essencial para manter um bom relacionamento.
-*   **Eficiência operacional:** Quando o cliente está ciente da data estimada de entrega, ele pode se organizar para receber o pacote. Isso evita tentativas de reentrega, que geram custos extras e frustração para ambas as partes.
+*   **Redução da ansiedade:** O consumidor moderno deseja acompanhar o status do pedido em tempo real. Fornecer atualizações constantes ajuda a gerenciar essa expectativa e demonstra profissionalismo.
+*   **Adaptação ao digital:** Para quem está começando a comprar online agora, o rastreamento funciona como uma ponte, tornando o processo mais transparente e menos intimidador.
+*   **Construção de credibilidade:** Um processo de entrega bem comunicado fortalece a reputação da sua marca. Quando o cliente se sente seguro, a chance de ele avaliar positivamente a loja e retornar para novas compras aumenta significativamente.
+*   **Eficiência logística:** O acompanhamento proativo permite que o lojista identifique movimentações atípicas ou atrasos antes que o cliente perceba, permitindo uma comunicação antecipada e resolutiva. Além disso, manter o cliente ciente da data de entrega ajuda a evitar tentativas de reentrega, otimizando custos e tempo.
 
-## Transformando a entrega em fidelização
+## Transformando a espera em satisfação
 
-Quando o processo de entrega ocorre sem falhas e com boa comunicação, a reputação da sua loja é fortalecida. Esse é o momento ideal para incentivar o marketing espontâneo, convidando o cliente a avaliar o produto ou a experiência de compra. 
-
-Lembre-se: cada atualização de status é uma oportunidade de manter sua marca presente na mente do consumidor. Ao investir em uma comunicação clara e eficiente após a venda, você não apenas entrega um produto, mas constrói a confiança necessária para que esse comprador retorne à sua loja no futuro.`,
+O segredo para a recorrência está em transformar a fase de espera em um momento de tranquilidade. Ao fornecer informações claras e automáticas, você não apenas evita dúvidas, mas também cria uma experiência de compra memorável. Lembre-se: o marketing espontâneo e a fidelização são construídos quando a promessa de entrega é cumprida com transparência e suporte constante. Ao priorizar a comunicação pós-compra, sua loja se destaca em um mercado cada vez mais competitivo e pulsante.`,
     metaTitle: "Pós-compra: Como fidelizar clientes através da experiência de entrega",
-    metaDescription: "Entenda como o rastreamento e a comunicação no pós-compra ajudam a reduzir a ansiedade do cliente e transformam compradores em clientes recorrentes.",
+    metaDescription:
+      "Entenda como o rastreamento e a comunicação no pós-compra ajudam a reduzir a ansiedade do cliente e transformam compradores em clientes recorrentes.",
+    ogImage:
+      "https://hn6ldxzrjpr0vrlp.public.blob.vercel-storage.com/articles/cmrgltu820005pgs0wawt4rm6-1783796982930.jpg",
+    imageCredit: IMAGE_CREDIT,
     publishedAt: new Date("2026-07-11T16:51:53.132Z"),
     sources: [
       {
-        title: "Entenda a importância do rastreamento de encomendas no e-commerce",
+        title:
+          "Entenda a importância do rastreamento de encomendas no e-commerce",
         url: "https://abcomm.org/noticias/entenda-a-importancia-do-rastreamento-de-encomendas-no-e-commerce/",
-        accessedAt: new Date("2026-07-11T16:51:52.680Z"),
+        accessedAt: new Date("2026-07-11T18:36:56.964Z"),
+      },
+    ],
+  },
+  {
+    title:
+      "Como lidar com trocas e devoluções no e-commerce: guia prático para lojistas",
+    slug: "como-lidar-com-trocas-e-devolucoes-no-e-commerce",
+    excerpt:
+      "Entenda como transformar o desafio das devoluções em uma oportunidade de fidelização e como reduzir custos operacionais na sua loja virtual.",
+    content: `## O impacto das devoluções no seu e-commerce
+
+As devoluções são uma parte natural do comércio digital, mas quando ocorrem em excesso, podem comprometer as margens de lucro da sua loja. Conforme apontado pela CNDL, uma parcela significativa dos custos operacionais no e-commerce é direcionada à logística reversa. Esse processo envolve gastos com coleta, transporte, armazenamento, inspeção, reembalagem e custos administrativos.
+
+Além do impacto financeiro, é preciso considerar a questão ambiental, já que o transporte adicional aumenta a emissão de carbono. No Brasil, o Código de Defesa do Consumidor garante o direito de arrependimento, permitindo que o cliente devolva produtos comprados online em até 7 dias, o que torna a gestão desse processo um diferencial competitivo fundamental.
+
+## Principais motivos de devolução
+
+Para mitigar esse problema, é preciso entender por que os clientes devolvem produtos. Segundo dados citados pela CNDL, os motivos mais comuns incluem:
+
+*   Itens danificados ou com defeito;
+*   Problemas com tamanho ou ajuste;
+*   Produtos que não correspondem à descrição original;
+*   Insatisfação geral com o item;
+*   Compra de múltiplos tamanhos para escolha posterior;
+*   Atrasos na entrega.
+
+## Estratégias para reduzir devoluções
+
+Educar o consumidor antes da compra é a melhor forma de evitar expectativas frustradas. Algumas práticas recomendadas incluem:
+
+*   **Conteúdo rico:** Utilize descrições detalhadas, imagens de alta resolução com múltiplos ângulos e vídeos que mostrem o produto em uso.
+*   **Transparência técnica:** Ofereça guias de medidas precisos e informações técnicas claras.
+*   **Prova social:** Incentive avaliações de outros clientes. Permitir que compradores filtrem comentários por biotipo, por exemplo, ajuda novos clientes a escolherem o tamanho correto.
+*   **Logística eficiente:** Em datas sazonais, como Natal e Dia das Mães, garanta que os prazos de entrega sejam cumpridos para evitar devoluções por atraso.
+*   **Atendimento consultivo:** Disponibilize canais de suporte para tirar dúvidas antes da finalização do pedido.
+
+## Como transformar a devolução em experiência positiva
+
+Se a devolução for inevitável, a forma como você conduz o processo define se o cliente voltará a comprar na sua loja. Um processo simples e objetivo é essencial. Oferecer uma página dedicada à solicitação de trocas, onde o cliente escolhe o método de envio e recebe instruções claras por e-mail, aumenta a confiança do consumidor.
+
+Além disso, considere:
+
+*   **Política clara:** Mantenha sua política de trocas e devoluções acessível e fácil de entender.
+*   **Feedback contínuo:** Após a devolução, solicite o feedback do cliente. Entender o motivo real da insatisfação é o primeiro passo para ajustar falhas no seu catálogo ou operação.
+*   **Integração com loja física:** Se você possui pontos físicos, permitir a troca ou devolução na loja pode ser uma excelente oportunidade para converter o cliente em uma nova venda.
+
+Lembre-se: embora não seja possível eliminar totalmente as devoluções, um processo bem estruturado protege sua margem de lucro e fortalece o relacionamento com o seu público.`,
+    metaTitle: "Como lidar com trocas e devoluções no e-commerce | Guia prático",
+    metaDescription:
+      "Saiba como criar uma política de trocas e devoluções clara, respeitar os prazos legais do CDC e reduzir custos com um processo eficiente no seu e-commerce.",
+    ogImage:
+      "https://hn6ldxzrjpr0vrlp.public.blob.vercel-storage.com/articles/cmrgu0mqo0000l70499qae7xw-1783802694027.jpg",
+    imageCredit: IMAGE_CREDIT,
+    publishedAt: new Date("2026-07-11T20:45:05.252Z"),
+    sources: [
+      {
+        title: "Devoluções no e-commerce: aprenda a mitigar o problema - Varejo ...",
+        url: "https://cndl.org.br/varejosa/devolucoes-no-e-commerce-aprenda-a-mitigar-o-problema/",
+        accessedAt: new Date("2026-07-11T20:45:04.706Z"),
       },
     ],
   },
