@@ -7,10 +7,10 @@ export default function Home() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center bg-kanglu-cream px-6 py-20 text-center">
       <Image
-        src="/kanglu-logo.png"
+        src="/kanglu-logo-completo.png"
         alt="Kanglu"
-        width={360}
-        height={96}
+        width={1397}
+        height={396}
         priority
         className="h-12 w-auto sm:h-14"
       />

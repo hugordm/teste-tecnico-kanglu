@@ -9,10 +9,10 @@ export function SiteHeader() {
       <div className="mx-auto flex w-full max-w-5xl items-center px-5 py-5 sm:px-8">
         <Link href="/" className="flex items-center" aria-label="Kanglu — página inicial">
           <Image
-            src="/kanglu-logo.png"
+            src="/kanglu-logo-completo.png"
             alt="Kanglu"
-            width={360}
-            height={96}
+            width={1397}
+            height={396}
             priority
             className="h-8 w-auto"
           />

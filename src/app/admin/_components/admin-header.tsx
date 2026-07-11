@@ -16,10 +16,10 @@ export function AdminHeader() {
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-3 sm:px-8">
         <Link href="/admin" className="flex items-center">
           <Image
-            src="/kanglu-logo.png"
+            src="/kanglu-logo-completo.png"
             alt="Kanglu"
-            width={360}
-            height={96}
+            width={1397}
+            height={396}
             priority
             className="h-8 w-auto"
           />
