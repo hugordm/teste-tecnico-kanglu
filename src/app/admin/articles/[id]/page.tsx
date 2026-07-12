@@ -319,6 +319,11 @@ export default function EditorPage() {
   const busy =
     saving || publishing || deleting || regenerating || generatingImage;
   const hasImage = isHttpUrl(form.ogImage);
+  // O campo de agendamento só faz sentido enquanto o artigo NÃO está visível no
+  // blog: rascunho, em revisão, ou publicado porém ainda agendado p/ o futuro.
+  // Publicado e já no ar (publishAt nulo ou no passado) esconde o campo — evita
+  // "reagendar" e sumir com um artigo que já está visível.
+  const canSchedule = article.status !== "published" || isScheduled(article);
 
   return (
     <Shell>
@@ -433,37 +438,47 @@ export default function EditorPage() {
             )}
           </div>
 
-          {/* Agendamento de publicação */}
-          <Section title="Agendar publicação">
-            <Field
-              label="Aparece no blog a partir de (horário local)"
-              htmlFor="publishAt"
-            >
-              <input
-                id="publishAt"
-                type="datetime-local"
-                value={form.publishAt}
-                onChange={(e) => set("publishAt", e.target.value)}
-                className={inputCls}
-              />
-              <p className="mt-1 text-xs text-kanglu-bordo/50">
-                Deixe vazio para publicar imediatamente. Com uma data futura, ao
-                publicar o artigo fica <strong>publicado</strong> mas só aparece
-                no blog a partir dela — some da listagem e responde 404 até a
-                hora, e passa a aparecer sozinho depois (sem cron). Gravado em
-                UTC, exibido no seu fuso.
-              </p>
-            </Field>
-            {form.publishAt.trim() !== "" && (
-              <button
-                type="button"
-                onClick={() => set("publishAt", "")}
-                className="text-sm font-medium text-kanglu-orange hover:underline"
+          {/* Agendamento de publicação — só quando o artigo ainda não está
+              visível no blog (ver canSchedule). Publicado e já no ar mostra
+              apenas um aviso discreto no lugar do campo. */}
+          {canSchedule ? (
+            <Section title="Agendar publicação">
+              <Field
+                label="Aparece no blog a partir de (horário local)"
+                htmlFor="publishAt"
               >
-                Limpar agendamento
-              </button>
-            )}
-          </Section>
+                <input
+                  id="publishAt"
+                  type="datetime-local"
+                  value={form.publishAt}
+                  onChange={(e) => set("publishAt", e.target.value)}
+                  className={inputCls}
+                />
+                <p className="mt-1 text-xs text-kanglu-bordo/50">
+                  Deixe vazio para publicar imediatamente. Com uma data futura, ao
+                  publicar o artigo fica <strong>publicado</strong> mas só aparece
+                  no blog a partir dela — some da listagem e responde 404 até a
+                  hora, e passa a aparecer sozinho depois (sem cron). Gravado em
+                  UTC, exibido no seu fuso.
+                </p>
+              </Field>
+              {form.publishAt.trim() !== "" && (
+                <button
+                  type="button"
+                  onClick={() => set("publishAt", "")}
+                  className="text-sm font-medium text-kanglu-orange hover:underline"
+                >
+                  Limpar agendamento
+                </button>
+              )}
+            </Section>
+          ) : (
+            <Section title="Agendar publicação">
+              <p className="text-sm text-kanglu-bordo/50">
+                Publicado e visível no blog.
+              </p>
+            </Section>
+          )}
 
           {/* Imagem ilustrativa (IA) */}
           <Section title="Imagem ilustrativa">
