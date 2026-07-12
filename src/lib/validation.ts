@@ -93,6 +93,10 @@ export const createArticleInput = z.object({
   aiAssisted: z.boolean().optional(),
   aiModel: z.string().trim().optional(),
 
+  // Agendamento: data/hora a partir da qual o artigo publicado aparece no blog.
+  // Chega como ISO (UTC) do client; coerce.date() a converte em Date.
+  publishAt: z.coerce.date().nullable().optional(),
+
   sources: z.array(sourceInput).optional(),
 });
 
@@ -119,6 +123,10 @@ export const updateArticleInput = z
 
     aiAssisted: z.boolean().optional(),
     aiModel: z.string().trim().nullable().optional(),
+
+    // Agendamento (ver createArticleInput). null limpa o agendamento (volta a
+    // aparecer assim que publicado). Ausência do campo o mantém como está.
+    publishAt: z.coerce.date().nullable().optional(),
 
     sources: z.array(sourceInput).optional(),
   })

@@ -31,6 +31,7 @@ export type AdminArticle = {
   aiAssisted: boolean;
   aiModel: string | null;
   publishedAt: string | null;
+  publishAt: string | null; // agendamento (ISO/UTC); null = sem agendamento
   createdAt: string;
   updatedAt: string;
   sources: AdminSource[];

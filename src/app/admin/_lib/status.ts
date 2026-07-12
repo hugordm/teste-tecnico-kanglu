@@ -37,3 +37,32 @@ export function formatDate(iso: string | null): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : dateFmt.format(d);
 }
+
+// Data + hora curtas ("12/07 14:30"), no fuso local do navegador — usado no
+// badge de agendamento. O ISO é UTC; o Intl converte para o horário local.
+const dateTimeFmt = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+export function formatDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : dateTimeFmt.format(d);
+}
+
+/**
+ * Um artigo está "agendado" quando está publicado mas com publishAt no futuro:
+ * já passou pelo portão de publicação, porém ainda invisível ao público até a
+ * hora marcada. Comparação em UTC (Date.parse do ISO vs. Date.now()).
+ */
+export function isScheduled(article: {
+  status: ArticleStatus;
+  publishAt: string | null;
+}): boolean {
+  if (article.status !== "published" || !article.publishAt) return false;
+  const t = Date.parse(article.publishAt);
+  return !Number.isNaN(t) && t > Date.now();
+}

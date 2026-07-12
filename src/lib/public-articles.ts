@@ -6,10 +6,22 @@ import type { Article, Source } from "@prisma/client";
 // um Client Component. É a trava de segurança que garante que a lógica de
 // leitura pública (e o Prisma) nunca vaze para o bundle do navegador.
 
-// O público só enxerga artigos publicados. Centralizamos o filtro numa
-// constante para que NENHUMA das duas funções abaixo possa esquecê-lo — é a
-// exigência de segurança do módulo: draft/in_review jamais chegam ao público.
-const PUBLISHED = { status: "published" as const };
+// O público só enxerga artigos publicados. Centralizamos o filtro num helper
+// para que NENHUMA das funções abaixo possa esquecê-lo — é a exigência de
+// segurança do módulo: draft/in_review jamais chegam ao público.
+//
+// Além do status, o filtro respeita o AGENDAMENTO: um artigo published só
+// aparece quando publishAt é null (sem agendamento) OU já passou. Um artigo
+// agendado para o futuro fica invisível até a hora e passa a aparecer sozinho
+// depois — sem cron, só pela query. É uma função (não constante) porque o
+// "agora" precisa ser recalculado a cada request. publishAt é gravado em UTC;
+// new Date() também é UTC, então a comparação é sempre no mesmo referencial.
+function publicWhere() {
+  return {
+    status: "published" as const,
+    OR: [{ publishAt: null }, { publishAt: { lte: new Date() } }],
+  };
+}
 
 export type PublicArticle = Article & { sources: Source[] };
 
@@ -36,12 +48,16 @@ export async function getPublishedArticles({
   const safePageSize = Math.min(Math.max(1, Math.trunc(pageSize)), 50);
   const safePage = Math.max(1, Math.trunc(page));
 
+  // Mesmo "agora" para contagem e listagem — evita que um artigo cruze a hora
+  // agendada entre as duas queries e a paginação fique inconsistente.
+  const where = publicWhere();
+
   // Uma transação: conta o total e busca a página no mesmo instante,
   // evitando divergência entre contagem e listagem.
   const [total, articles] = await prisma.$transaction([
-    prisma.article.count({ where: PUBLISHED }),
+    prisma.article.count({ where }),
     prisma.article.findMany({
-      where: PUBLISHED,
+      where,
       orderBy: { publishedAt: "desc" },
       include: { sources: true },
       skip: (safePage - 1) * safePageSize,
@@ -67,15 +83,16 @@ export async function getPublishedArticleBySlug(
   slug: string,
 ): Promise<PublicArticle | null> {
   return prisma.article.findFirst({
-    where: { slug, ...PUBLISHED },
+    where: { slug, ...publicWhere() },
     include: { sources: true },
   });
 }
 
 /**
- * TODOS os artigos publicados, enxutos (só slug + updatedAt), para o sitemap.
- * Reusa a MESMA constante PUBLISHED das funções acima — o filtro de segurança
- * não é reescrito, então rascunhos/em revisão continuam impossíveis de vazar.
+ * TODOS os artigos publicados E já visíveis (slug + updatedAt), para o sitemap.
+ * Reusa o MESMO publicWhere() das funções acima — o filtro de segurança não é
+ * reescrito, então rascunhos/em revisão continuam impossíveis de vazar, e os
+ * agendados ainda não visíveis também ficam de fora do sitemap.
  *
  * Diferente de getPublishedArticles(): sem paginação (o sitemap precisa de
  * TODOS, e aquele helper limita a 50) e sem include de sources (o sitemap não
@@ -85,7 +102,7 @@ export async function getPublishedArticlesForSitemap(): Promise<
   { slug: string; updatedAt: Date }[]
 > {
   return prisma.article.findMany({
-    where: PUBLISHED,
+    where: publicWhere(),
     orderBy: { publishedAt: "desc" },
     select: { slug: true, updatedAt: true },
   });

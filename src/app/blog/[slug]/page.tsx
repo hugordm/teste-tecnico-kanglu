@@ -15,6 +15,11 @@ const dateFmt = new Intl.DateTimeFormat("pt-BR", {
   year: "numeric",
 });
 
+// Revalida no máximo a cada 60s. Um artigo agendado responde 404 até a hora;
+// com ISR, passada a hora a página se re-renderiza (em até ~60s) e passa a
+// servir o artigo — o agendamento "liga" sozinho, sem cron nem redeploy.
+export const revalidate = 60;
+
 type Props = { params: Promise<{ slug: string }> };
 
 /**

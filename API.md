@@ -45,6 +45,7 @@ Retorna um artigo com suas fontes. `200` · `404` · `401`.
 ### `PATCH /api/articles/[id]`
 Edita um artigo. Aceita `draft`, `in_review`, `archived` — **não** aceita `published`.
 As fontes, se enviadas, substituem o conjunto atual.
+Campo `publishAt` (ISO em UTC, ou `null`): **agenda** a partir de quando o artigo publicado aparece no blog. `null` (ou ausente na criação) = aparece assim que publicado.
 **Respostas:** `200` · `400` (inclui tentativa de setar `published`) · `404` · `401`.
 
 ### `DELETE /api/articles/[id]`
@@ -84,20 +85,20 @@ Gera uma ilustração de capa via Nano Banana 2, faz upload no Vercel Blob e sal
 
 ## Rotas públicas (blog) — sem autenticação
 
-Servem apenas artigos `published`.
+Servem apenas artigos `published` **e já visíveis** — um artigo agendado (`publishAt` no futuro) é tratado como não publicado até a hora. As páginas usam ISR (`revalidate = 60`), então o artigo agendado passa a aparecer sozinho até ~60s após a data, sem cron nem redeploy.
 
 ### `GET /blog`
-Listagem paginada dos artigos publicados (SSR). Query `?page=`.
+Listagem paginada dos artigos publicados e visíveis (SSR). Query `?page=`.
 
 ### `GET /blog/[slug]`
-Página do artigo: HTML semântico, metadados de SEO, JSON-LD `BlogPosting`, imagem de capa com crédito (se houver), e seção "Fontes e referências". Slug de rascunho ou inexistente → 404.
+Página do artigo: HTML semântico, metadados de SEO, JSON-LD `BlogPosting`, imagem de capa com crédito (se houver), e seção "Fontes e referências". Slug de rascunho, **agendado ainda não visível**, ou inexistente → 404.
 
 ---
 
 ## Rotas de SEO (geradas pelo Next)
 
 ### `GET /sitemap.xml`
-Sitemap dinâmico — reflete os artigos publicados em runtime. Inclui `/`, `/blog` e cada `/blog/{slug}`.
+Sitemap dinâmico — reflete os artigos publicados **e já visíveis** em runtime (agendados ainda não visíveis ficam de fora). Inclui `/`, `/blog` e cada `/blog/{slug}`.
 
 ### `GET /robots.txt`
 Permite indexação, bloqueia `/admin`, aponta o sitemap.

@@ -8,6 +8,12 @@ export const metadata: Metadata = {
   description: "Artigos e novidades da Kanglu.",
 };
 
+// Revalida no máximo a cada 60s. Sem isto, em produção a listagem seria
+// estática e um artigo AGENDADO nunca apareceria sozinho quando sua hora
+// chegasse. Com ISR, passada a hora agendada a página se re-renderiza (em até
+// ~60s) e o artigo entra na lista — sem cron e sem redeploy.
+export const revalidate = 60;
+
 const PAGE_SIZE = 6;
 
 // Formata datas em pt-BR ("11 de julho de 2026"). Criado uma vez no módulo

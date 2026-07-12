@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { AdminHeader } from "./_components/admin-header";
 import { useToast } from "./_components/toast";
 import { apiFetch, ApiError } from "./_lib/api";
-import { STATUS_META, formatDate } from "./_lib/status";
+import { STATUS_META, formatDate, formatDateTime, isScheduled } from "./_lib/status";
 import type { AdminArticle, ArticleStatus } from "./_lib/types";
 
 // As três colunas do fluxo editorial. "Em revisão" é destacada porque é o
@@ -284,6 +284,7 @@ function ArticleCard({
   onDelete: (id: string, title: string) => void;
 }) {
   const meta = STATUS_META[article.status];
+  const scheduled = isScheduled(article);
   // stopPropagation nas ações: clicar num botão não deve abrir o editor.
   const stop = (fn: () => void) => (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -309,10 +310,18 @@ function ArticleCard({
         )}
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${meta.badge}`}>
           {meta.label}
         </span>
+        {scheduled && (
+          <span
+            title={`Publicado, mas só aparece no blog a partir de ${formatDateTime(article.publishAt)}`}
+            className="rounded bg-kanglu-orange/15 px-1.5 py-0.5 text-[10px] font-semibold text-kanglu-orange"
+          >
+            ⏱ Agendado p/ {formatDateTime(article.publishAt)}
+          </span>
+        )}
         <time className="text-xs text-kanglu-bordo/50">
           {formatDate(article.publishedAt ?? article.updatedAt)}
         </time>

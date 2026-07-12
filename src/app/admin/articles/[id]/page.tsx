@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { AdminHeader } from "../../_components/admin-header";
 import { useToast } from "../../_components/toast";
 import { apiFetch, ApiError } from "../../_lib/api";
-import { STATUS_META } from "../../_lib/status";
+import { STATUS_META, formatDateTime, isScheduled } from "../../_lib/status";
 import type { AdminArticle, AdminSource } from "../../_lib/types";
 import { ArticleMarkdown } from "@/components/article-markdown";
 
@@ -21,12 +21,34 @@ type FormState = {
   canonicalUrl: string;
   ogImage: string;
   workflowStatus: "draft" | "in_review"; // estados de workflow editáveis
+  publishAt: string; // datetime-local ("YYYY-MM-DDTHH:mm"), vazio = sem agendamento
 };
 
 type SourceRow = { title: string; url: string };
 
 const isHttpUrl = (v: string) => /^https?:\/\/\S+$/i.test(v.trim());
 const toNull = (s: string) => (s.trim() === "" ? null : s.trim());
+
+// ISO (UTC, vindo da API) -> valor do <input type="datetime-local">, que é
+// sempre HORÁRIO LOCAL. Usamos os getters locais do Date, então o navegador do
+// editor vê a hora no seu próprio fuso. Vazio se não houver agendamento.
+function isoToLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Valor do datetime-local (horário LOCAL, sem fuso) -> ISO em UTC para gravar.
+// `new Date("2026-07-12T14:30")` é interpretado como hora local pelo runtime,
+// e toISOString() a normaliza para UTC — o fuso é resolvido aqui, uma vez.
+function localInputToIso(local: string): string | null {
+  const v = local.trim();
+  if (v === "") return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
 
 export default function EditorPage() {
   const { id } = useParams<{ id: string }>();
@@ -74,6 +96,7 @@ export default function EditorPage() {
       canonicalUrl: a.canonicalUrl ?? "",
       ogImage: a.ogImage ?? "",
       workflowStatus: a.status === "in_review" ? "in_review" : "draft",
+      publishAt: isoToLocalInput(a.publishAt),
     });
     setSources(
       a.sources.map((s: AdminSource) => ({ title: s.title, url: s.url })),
@@ -123,6 +146,7 @@ export default function EditorPage() {
       canonicalUrl: toNull(form.canonicalUrl),
       ogImage: toNull(form.ogImage),
       status: form.workflowStatus,
+      publishAt: localInputToIso(form.publishAt),
       sources: cleanSources,
     };
   }
@@ -311,6 +335,14 @@ export default function EditorPage() {
           <span className={`rounded px-2 py-1 text-xs font-semibold ${meta.badge}`}>
             {meta.label}
           </span>
+          {isScheduled(article) && (
+            <span
+              title="Publicado, mas só aparece no blog a partir da data agendada"
+              className="rounded bg-kanglu-orange/15 px-2 py-1 text-xs font-semibold text-kanglu-orange"
+            >
+              ⏱ Agendado p/ {formatDateTime(article.publishAt)}
+            </span>
+          )}
           {article.aiAssisted && (
             <span className="rounded bg-kanglu-nude/40 px-2 py-1 text-xs font-semibold text-kanglu-bordo">
               Assistido por IA
@@ -400,6 +432,38 @@ export default function EditorPage() {
               </p>
             )}
           </div>
+
+          {/* Agendamento de publicação */}
+          <Section title="Agendar publicação">
+            <Field
+              label="Aparece no blog a partir de (horário local)"
+              htmlFor="publishAt"
+            >
+              <input
+                id="publishAt"
+                type="datetime-local"
+                value={form.publishAt}
+                onChange={(e) => set("publishAt", e.target.value)}
+                className={inputCls}
+              />
+              <p className="mt-1 text-xs text-kanglu-bordo/50">
+                Deixe vazio para publicar imediatamente. Com uma data futura, ao
+                publicar o artigo fica <strong>publicado</strong> mas só aparece
+                no blog a partir dela — some da listagem e responde 404 até a
+                hora, e passa a aparecer sozinho depois (sem cron). Gravado em
+                UTC, exibido no seu fuso.
+              </p>
+            </Field>
+            {form.publishAt.trim() !== "" && (
+              <button
+                type="button"
+                onClick={() => set("publishAt", "")}
+                className="text-sm font-medium text-kanglu-orange hover:underline"
+              >
+                Limpar agendamento
+              </button>
+            )}
+          </Section>
 
           {/* Imagem ilustrativa (IA) */}
           <Section title="Imagem ilustrativa">

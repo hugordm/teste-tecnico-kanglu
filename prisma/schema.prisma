@@ -37,6 +37,11 @@ model Article {
   aiModel         String?
 
   publishedAt     DateTime?
+  // A partir de quando um artigo publicado deve aparecer no blog. Null =
+  // aparece assim que publicado (comportamento padrão). Data futura = fica
+  // published, mas invisível ao público até a hora (agendamento sem cron —
+  // o filtro é aplicado na query pública). Gravado sempre em UTC.
+  publishAt       DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
