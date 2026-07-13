@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from "../../_lib/api";
 import { STATUS_META, formatDateTime, isScheduled } from "../../_lib/status";
 import type { AdminArticle, AdminSource } from "../../_lib/types";
 import { ArticleBody } from "@/components/article-body";
+import { DateTimePicker } from "../../_components/datetime-picker";
 import { IMAGE_MARKER, imageMarker } from "@/lib/body-images";
 
 // Estado editável do formulário — espelho local do artigo. Datas/slug/status
@@ -528,12 +529,10 @@ export default function EditorPage() {
                 label="Aparece no blog a partir de (horário local)"
                 htmlFor="publishAt"
               >
-                <input
+                <DateTimePicker
                   id="publishAt"
-                  type="datetime-local"
                   value={form.publishAt}
-                  onChange={(e) => set("publishAt", e.target.value)}
-                  className={inputCls}
+                  onChange={(v) => set("publishAt", v)}
                 />
                 <p className="mt-1 text-xs text-kanglu-bordo/50">
                   Deixe vazio para publicar imediatamente. Com uma data futura, ao

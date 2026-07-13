@@ -44,3 +44,25 @@ button:disabled,
 [role="button"][aria-disabled="true"] {
   cursor: not-allowed;
 }
+
+/*
+ * Fade-in curto das mensagens rotativas de loading (geração de artigo). Cada
+ * troca de mensagem remonta o <span> (key), então a animação toca de novo.
+ * Respeita prefers-reduced-motion: sem animação para quem pede menos movimento.
+ */
+@keyframes message-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-message-fade {
+  animation: message-fade 0.4s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-message-fade {
+    animation: none;
+  }
+}

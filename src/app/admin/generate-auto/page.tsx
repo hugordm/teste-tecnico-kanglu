@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { AdminHeader } from "../_components/admin-header";
 import { useToast } from "../_components/toast";
 import { apiFetch, ApiError } from "../_lib/api";
+import {
+  LoadingMessages,
+  GENERATE_AUTO_MESSAGES,
+} from "../_components/loading-messages";
 import type { AdminArticle } from "../_lib/types";
 
 // Geração por TEMA com busca web automática. Diferente de /admin/generate: não
@@ -136,11 +140,7 @@ export default function GenerateAutoPage() {
                 ? "Buscando fontes e gerando… (pode levar um tempo)"
                 : "Gerar rascunho"}
             </button>
-            {loading && (
-              <span className="text-sm text-kanglu-bordo/50">
-                Buscando na web, filtrando concorrentes e escrevendo…
-              </span>
-            )}
+            {loading && <LoadingMessages messages={GENERATE_AUTO_MESSAGES} />}
           </div>
         </form>
       </main>

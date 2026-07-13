@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { AdminHeader } from "../_components/admin-header";
 import { useToast } from "../_components/toast";
 import { apiFetch, ApiError } from "../_lib/api";
+import {
+  LoadingMessages,
+  GENERATE_URLS_MESSAGES,
+} from "../_components/loading-messages";
 import type { AdminArticle } from "../_lib/types";
 
 // Geração por IA. A chamada pode DEMORAR (extrai URLs + chama o modelo), então
@@ -177,11 +181,7 @@ export default function GeneratePage() {
             >
               {loading ? "Gerando… (pode levar alguns segundos)" : "Gerar rascunho"}
             </button>
-            {loading && (
-              <span className="text-sm text-kanglu-bordo/50">
-                Extraindo fontes e escrevendo…
-              </span>
-            )}
+            {loading && <LoadingMessages messages={GENERATE_URLS_MESSAGES} />}
           </div>
         </form>
       </main>
