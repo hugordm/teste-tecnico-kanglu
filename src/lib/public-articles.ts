@@ -89,6 +89,23 @@ export async function getPublishedArticleBySlug(
 }
 
 /**
+ * Artigos publicados E já visíveis, com o mínimo que o chatbot do blog precisa
+ * para montar seu contexto (título + excerpt + conteúdo). Reusa o MESMO
+ * `publicWhere()` de segurança — rascunho/em revisão/agendado jamais entram no
+ * contexto do bot. Ordena do mais recente para o mais antigo, para o builder de
+ * contexto priorizar os artigos novos quando houver orçamento de tokens.
+ */
+export async function getPublishedArticlesForChat(): Promise<
+  { title: string; excerpt: string | null; content: string }[]
+> {
+  return prisma.article.findMany({
+    where: publicWhere(),
+    orderBy: { publishedAt: "desc" },
+    select: { title: true, excerpt: true, content: true },
+  });
+}
+
+/**
  * TODOS os artigos publicados E já visíveis (slug + updatedAt), para o sitemap.
  * Reusa o MESMO publicWhere() das funções acima — o filtro de segurança não é
  * reescrito, então rascunhos/em revisão continuam impossíveis de vazar, e os
