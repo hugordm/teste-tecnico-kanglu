@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ArticleBody } from "@/components/article-body";
+import { TableOfContents } from "@/components/table-of-contents";
 import { SiteHeader } from "@/components/site-header";
 import {
   getPublishedArticleBySlug,
   type PublicArticle,
 } from "@/lib/public-articles";
+import { extractHeadings } from "@/lib/toc";
 import { SITE_URL } from "@/lib/site";
 
 const dateFmt = new Intl.DateTimeFormat("pt-BR", {
@@ -95,6 +97,14 @@ export default async function ArticlePage({ params }: Props) {
 
   const jsonLd = buildBlogPostingLd(article);
 
+  // Mesma extração pura usada pelo índice inline do ArticleBody — aqui alimenta o
+  // índice LATERAL (sticky) do desktop. Os ids das âncoras continuam sendo postos
+  // no corpo pelo ArticleMarkdown, então os dois índices (topo no mobile/tablet,
+  // lateral no desktop) apontam pras mesmas seções. Só mostramos a sidebar com
+  // 2+ seções (mesma regra do inline).
+  const headings = extractHeadings(article.content);
+  const hasToc = headings.length >= 2;
+
   return (
     <div className="flex flex-col flex-1">
       {/* JSON-LD BlogPosting: dados reais do artigo para rich results. */}
@@ -105,8 +115,16 @@ export default async function ArticlePage({ params }: Props) {
 
       <SiteHeader />
 
-      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-10 sm:px-8 sm:py-14">
-        <article>
+      {/* Container largo (max-w-7xl) que no DESKTOP (lg+) vira 2 colunas estilo
+          HostGator: conteúdo largo à esquerda + índice sticky à direita, ocupando
+          bem a tela. A coluna de texto é ~68% (1fr) e a sidebar ~26% (20rem), com
+          gap generoso — juntas preenchem o container. No corpo, tipo maior
+          (lg:text-xl) mantém a leitura confortável mesmo na coluna larga.
+          Abaixo de lg é 1 coluna: a coluna de texto centra em max-w-2xl e o
+          índice volta pro topo (via ArticleBody tocInline="mobileOnly") —
+          idêntico ao aprovado. */}
+      <main className="mx-auto w-full max-w-7xl flex-1 px-5 py-10 sm:px-8 sm:py-14 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-16 lg:py-16 xl:gap-20">
+        <article className="mx-auto w-full min-w-0 max-w-2xl lg:mx-0 lg:max-w-none">
           <Link
             href="/blog"
             className="text-sm font-medium text-kanglu-orange hover:underline"
@@ -114,7 +132,7 @@ export default async function ArticlePage({ params }: Props) {
             ← Voltar ao blog
           </Link>
 
-          <h1 className="mt-6 font-heading text-3xl font-bold leading-tight text-kanglu-bordo sm:text-4xl">
+          <h1 className="mt-6 font-heading text-3xl font-bold leading-tight text-kanglu-bordo sm:text-4xl lg:text-5xl lg:leading-[1.1]">
             {article.title}
           </h1>
 
@@ -124,9 +142,9 @@ export default async function ArticlePage({ params }: Props) {
             </p>
           )}
 
-          {/* Capa + corpo via componente COMPARTILHADO com a prévia do editor —
-              mesma aparência garantida (capa com crédito no topo + imagens do
-              corpo). */}
+          {/* Capa + corpo via componente COMPARTILHADO com a prévia do editor. No
+              desktop o índice inline some (tocInline="mobileOnly") — a sidebar à
+              direita assume; no mobile/tablet ele volta pro topo, como antes. */}
           <ArticleBody
             title={article.title}
             content={article.content}
@@ -134,10 +152,21 @@ export default async function ArticlePage({ params }: Props) {
             imageCredit={article.imageCredit}
             imageSourceUrl={article.imageSourceUrl}
             publishedAt={article.publishedAt}
+            tocInline="mobileOnly"
           />
 
           <SourcesSection sources={article.sources} />
         </article>
+
+        {/* Índice LATERAL — só no desktop (lg+) e só com 2+ seções. Coluna com
+            presença (card estilizado) e sticky, acompanhando o scroll da leitura. */}
+        {hasToc && (
+          <aside className="hidden lg:block">
+            <div className="sticky top-8">
+              <TableOfContents entries={headings} variant="sidebar" />
+            </div>
+          </aside>
+        )}
       </main>
     </div>
   );

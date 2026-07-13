@@ -69,7 +69,7 @@ export default async function BlogPage({
     <div className="flex flex-col flex-1">
       <SiteHeader />
 
-      <main className="mx-auto w-full max-w-5xl flex-1 px-5 py-10 sm:px-8 sm:py-14">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10 sm:px-8 sm:py-14 lg:py-16">
         <h1 className="font-heading text-3xl font-bold text-kanglu-bordo sm:text-4xl">
           Blog
         </h1>
@@ -87,7 +87,7 @@ export default async function BlogPage({
           )
         ) : (
           <>
-            <section className="mt-8 grid gap-6 sm:grid-cols-2">
+            <section className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {articles.map((article) => (
                 <ArticleCard key={article.id} article={article} />
               ))}
@@ -119,9 +119,11 @@ export default async function BlogPage({
  */
 function SearchBar({ query }: { query: string }) {
   return (
-    <Form action="/blog" className="mt-8">
+    // Largura limitada (max-w-2xl) e alinhada à esquerda: no desktop a busca não
+    // vira uma barra gigante atravessando as 3 colunas.
+    <Form action="/blog" className="mt-8 max-w-2xl">
       <div className="flex items-center gap-3">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           {/* Ícone de lupa decorativo dentro do campo. */}
           <svg
             aria-hidden="true"
@@ -149,21 +151,22 @@ function SearchBar({ query }: { query: string }) {
 
         <button
           type="submit"
-          className="rounded-full bg-kanglu-orange px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-kanglu-orange/90"
+          className="shrink-0 rounded-full bg-kanglu-orange px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-kanglu-orange/90"
         >
           Buscar
         </button>
-
-        {/* "Limpar" só faz sentido quando há uma busca ativa. */}
-        {query && (
-          <Link
-            href="/blog"
-            className="text-sm font-medium text-kanglu-orange hover:underline"
-          >
-            Limpar
-          </Link>
-        )}
       </div>
+
+      {/* "Limpar" só aparece com busca ativa. Fica em linha própria (abaixo do
+          campo) pra não apertar a linha input+botão nos ~375px do mobile. */}
+      {query && (
+        <Link
+          href="/blog"
+          className="mt-2 inline-block text-sm font-medium text-kanglu-orange hover:underline"
+        >
+          Limpar busca
+        </Link>
+      )}
     </Form>
   );
 }

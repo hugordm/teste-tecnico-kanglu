@@ -1,5 +1,6 @@
 import { ArticleMarkdown } from "@/components/article-markdown";
 import { TableOfContents } from "@/components/table-of-contents";
+import { CoverImage } from "@/components/cover-image";
 import { extractHeadings } from "@/lib/toc";
 import { formatReadingTime } from "@/lib/reading-time";
 
@@ -24,6 +25,7 @@ export function ArticleBody({
   imageCredit,
   imageSourceUrl,
   publishedAt,
+  tocInline = "always",
 }: {
   title: string;
   content: string;
@@ -31,6 +33,11 @@ export function ArticleBody({
   imageCredit?: string | null;
   imageSourceUrl?: string | null;
   publishedAt?: Date | null;
+  // Onde o índice inline (no topo do corpo) aparece:
+  // - "always": sempre (mobile/tablet e prévia do editor).
+  // - "mobileOnly": some no desktop (lg+), onde a página do artigo mostra o
+  //   índice numa sidebar sticky. Assim só há UM índice visível por breakpoint.
+  tocInline?: "always" | "mobileOnly";
 }) {
   // Extração ÚNICA dos headings: a mesma lista alimenta o índice (links) e os
   // ids das âncoras no corpo (passada ao ArticleMarkdown), então cada item do
@@ -60,41 +67,23 @@ export function ArticleBody({
       </p>
 
       {/* Imagem ilustrativa no topo, com crédito do modelo logo abaixo. Só
-          aparece quando o artigo tem imagem — do contrário o layout segue normal
-          (imagem é opcional). */}
-      {ogImage && (
-        <figure className="mt-8">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={ogImage}
-            alt={`Ilustração do artigo: ${title}`}
-            className="w-full rounded-xl border border-kanglu-nude object-cover"
-          />
-          {imageCredit && (
-            <figcaption className="mt-2 text-xs text-kanglu-bordo/50">
-              Crédito da imagem:{" "}
-              {imageSourceUrl ? (
-                <a
-                  href={imageSourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-kanglu-orange hover:underline"
-                >
-                  {imageCredit}
-                </a>
-              ) : (
-                imageCredit
-              )}
-            </figcaption>
-          )}
-        </figure>
-      )}
+          aparece quando o artigo tem imagem (capa é opcional). Fica na coluna de
+          leitura em todos os tamanhos. */}
+      <CoverImage
+        src={ogImage}
+        title={title}
+        credit={imageCredit}
+        sourceUrl={imageSourceUrl}
+        figureClassName="mt-8"
+      />
 
       {/* Índice do artigo ("Neste artigo:") — só aparece com 2+ seções. Usa a
           mesma lista de headings passada ao corpo, então os links batem com as
-          âncoras. Antes do corpo, depois da capa. */}
+          âncoras. Fica no topo do corpo (depois da capa). Quando `tocInline` é
+          "mobileOnly", some no desktop (lg+) — lá a página do artigo mostra o
+          índice numa sidebar sticky. */}
       {headings.length >= 2 && (
-        <div className="mt-8">
+        <div className={`mt-8${tocInline === "mobileOnly" ? " lg:hidden" : ""}`}>
           <TableOfContents entries={headings} />
         </div>
       )}

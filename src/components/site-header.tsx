@@ -2,11 +2,13 @@ import Image from "next/image";
 import Link from "next/link";
 
 // Cabeçalho da marca no blog público: a logo (imagem) leva de volta à home.
-// Mesma imagem usada no painel admin; centralizada num container max-w-5xl.
+// Mesma imagem usada no painel admin; centralizada num container max-w-6xl —
+// a MESMA largura da listagem e do artigo, pra a logo alinhar com a borda do
+// conteúdo nas três telas.
 export function SiteHeader() {
   return (
     <header className="border-b border-kanglu-nude bg-kanglu-cream">
-      <div className="mx-auto flex w-full max-w-5xl items-center px-5 py-5 sm:px-8">
+      <div className="mx-auto flex w-full max-w-6xl items-center px-5 py-5 sm:px-8">
         <Link href="/" className="flex items-center" aria-label="Kanglu — página inicial">
           <Image
             src="/kanglu-logo-completo.png"

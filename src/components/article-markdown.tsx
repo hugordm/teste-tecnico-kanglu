@@ -64,7 +64,7 @@ const components: Components = {
   h2: ({ children, id }) => (
     <h2
       id={id}
-      className="mt-10 mb-3 scroll-mt-24 font-heading text-2xl font-semibold text-kanglu-bordo"
+      className="mt-10 mb-3 scroll-mt-24 font-heading text-2xl font-semibold text-kanglu-bordo lg:text-3xl"
     >
       {children}
     </h2>
@@ -72,7 +72,7 @@ const components: Components = {
   h3: ({ children, id }) => (
     <h3
       id={id}
-      className="mt-8 mb-2 scroll-mt-24 font-heading text-xl font-semibold text-kanglu-bordo"
+      className="mt-8 mb-2 scroll-mt-24 font-heading text-xl font-semibold text-kanglu-bordo lg:text-2xl"
     >
       {children}
     </h3>
@@ -183,7 +183,7 @@ export function ArticleMarkdown({
   });
 
   return (
-    <div className="leading-relaxed text-kanglu-bordo/90">
+    <div className="leading-relaxed text-kanglu-bordo/90 lg:text-xl lg:leading-relaxed">
       {parts.map((part, i) =>
         part.type === "text" ? (
           <ReactMarkdown
