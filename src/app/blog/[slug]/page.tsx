@@ -118,15 +118,6 @@ export default async function ArticlePage({ params }: Props) {
             {article.title}
           </h1>
 
-          {article.publishedAt && (
-            <time
-              dateTime={article.publishedAt.toISOString()}
-              className="mt-3 block text-sm text-kanglu-bordo/50"
-            >
-              {dateFmt.format(article.publishedAt)}
-            </time>
-          )}
-
           {article.aiAssisted && (
             <p className="mt-4 rounded-lg border border-kanglu-nude bg-white px-4 py-3 text-sm text-kanglu-bordo/70">
               Rascunho assistido por IA, revisado pelo autor.
@@ -142,6 +133,7 @@ export default async function ArticlePage({ params }: Props) {
             ogImage={article.ogImage}
             imageCredit={article.imageCredit}
             imageSourceUrl={article.imageSourceUrl}
+            publishedAt={article.publishedAt}
           />
 
           <SourcesSection sources={article.sources} />
