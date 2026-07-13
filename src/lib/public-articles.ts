@@ -25,6 +25,22 @@ function publicWhere() {
 
 export type PublicArticle = Article & { sources: Source[] };
 
+/**
+ * Normaliza texto para BUSCA: remove acentos (NFD → sem diacríticos) e passa a
+ * minúsculas. Assim "configuração" casa com "configuracao" e "CONFIG". É o
+ * folding aplicado dos DOIS lados (termo e conteúdo) para a comparação ser
+ * simétrica. Feito em JS de propósito: o Postgres puro é case-insensitive via
+ * `mode: insensitive`, mas NÃO ignora acentos sem a extensão `unaccent` — e não
+ * dá pra assumi-la instalada. Como o filtro roda sobre poucos artigos, o custo é
+ * irrelevante.
+ */
+function foldText(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 export type PublishedArticlesPage = {
   articles: PublicArticle[];
   total: number;
@@ -34,16 +50,27 @@ export type PublishedArticlesPage = {
 };
 
 /**
- * Lista paginada de artigos publicados (mais recentes primeiro).
+ * Lista paginada de artigos publicados (mais recentes primeiro), opcionalmente
+ * filtrada por `query` (busca no título + excerpt).
  * `page`/`pageSize` são saneados para evitar skip negativo ou take absurdo
  * vindo de um ?page= manipulado na URL.
+ *
+ * Dois caminhos:
+ * - SEM busca: pagina no banco (skip/take) — eficiente, inalterado.
+ * - COM busca: busca todos os publicados e filtra EM MEMÓRIA com folding
+ *   (acento/caixa), depois pagina o resultado. É o preço de ter busca
+ *   accent-insensitive sem a extensão `unaccent` do Postgres; aceitável porque
+ *   o volume de artigos publicados é pequeno. Os DOIS caminhos reusam o mesmo
+ *   `publicWhere()` — rascunho/em revisão/agendado nunca aparecem na busca.
  */
 export async function getPublishedArticles({
   page = 1,
   pageSize = 6,
+  query,
 }: {
   page?: number;
   pageSize?: number;
+  query?: string;
 } = {}): Promise<PublishedArticlesPage> {
   const safePageSize = Math.min(Math.max(1, Math.trunc(pageSize)), 50);
   const safePage = Math.max(1, Math.trunc(page));
@@ -52,8 +79,35 @@ export async function getPublishedArticles({
   // agendada entre as duas queries e a paginação fique inconsistente.
   const where = publicWhere();
 
-  // Uma transação: conta o total e busca a página no mesmo instante,
-  // evitando divergência entre contagem e listagem.
+  const term = query ? foldText(query.trim()) : "";
+
+  // COM busca: filtra em memória e pagina o resultado filtrado.
+  if (term) {
+    const all = await prisma.article.findMany({
+      where,
+      orderBy: { publishedAt: "desc" },
+      include: { sources: true },
+    });
+
+    const matches = all.filter((article) => {
+      const haystack = foldText(`${article.title} ${article.excerpt ?? ""}`);
+      return haystack.includes(term);
+    });
+
+    const total = matches.length;
+    const start = (safePage - 1) * safePageSize;
+
+    return {
+      articles: matches.slice(start, start + safePageSize),
+      total,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+    };
+  }
+
+  // SEM busca: caminho paginado no banco. Uma transação: conta o total e busca a
+  // página no mesmo instante, evitando divergência entre contagem e listagem.
   const [total, articles] = await prisma.$transaction([
     prisma.article.count({ where }),
     prisma.article.findMany({

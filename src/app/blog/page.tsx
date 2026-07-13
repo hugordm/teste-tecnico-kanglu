@@ -1,15 +1,31 @@
 import Link from "next/link";
+import Form from "next/form";
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
 import { getPublishedArticles, type PublicArticle } from "@/lib/public-articles";
 import { SITE_URL } from "@/lib/site";
 
-export const metadata: Metadata = {
-  title: "Blog",
-  description: "Artigos e novidades da Kanglu.",
-  // Canônica da listagem — mesma base do sitemap/JSON-LD.
-  alternates: { canonical: `${SITE_URL}/blog` },
-};
+/**
+ * Metadata da listagem. A canônica aponta SEMPRE para `/blog` (sem query), para
+ * as páginas de busca não competirem com a listagem no índice. E páginas de
+ * busca (`?q=`) recebem `noindex`: são resultados finos/duplicados, não vale
+ * indexá-los — a listagem base segue indexável como antes.
+ */
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}): Promise<Metadata> {
+  const { q } = await searchParams;
+  const term = q?.trim();
+
+  return {
+    title: term ? `Busca: “${term}”` : "Blog",
+    description: "Artigos e novidades da Kanglu.",
+    alternates: { canonical: `${SITE_URL}/blog` },
+    ...(term ? { robots: { index: false, follow: true } } : {}),
+  };
+}
 
 // Revalida no máximo a cada 60s. Sem isto, em produção a listagem seria
 // estática e um artigo AGENDADO nunca apareceria sozinho quando sua hora
@@ -36,15 +52,18 @@ const dateFmt = new Intl.DateTimeFormat("pt-BR", {
 export default async function BlogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
-  const { page: pageParam } = await searchParams;
+  const { page: pageParam, q: qParam } = await searchParams;
   // ?page= vem como string (ou array/undefined); parse tolerante que cai em 1.
   const requestedPage = Number.parseInt(pageParam ?? "1", 10);
   const page = Number.isFinite(requestedPage) ? requestedPage : 1;
+  // ?q= é o termo de busca. Normalizamos o vazio ("" ou só espaços) para
+  // "sem busca", então `/blog?q=` se comporta igual a `/blog`.
+  const query = qParam?.trim() ?? "";
 
   const { articles, page: currentPage, totalPages, total } =
-    await getPublishedArticles({ page, pageSize: PAGE_SIZE });
+    await getPublishedArticles({ page, pageSize: PAGE_SIZE, query });
 
   return (
     <div className="flex flex-col flex-1">
@@ -58,24 +77,111 @@ export default async function BlogPage({
           Artigos e novidades da Kanglu.
         </p>
 
+        <SearchBar query={query} />
+
         {articles.length === 0 ? (
-          <EmptyState />
+          query ? (
+            <NoResults query={query} />
+          ) : (
+            <EmptyState />
+          )
         ) : (
           <>
-            <section className="mt-10 grid gap-6 sm:grid-cols-2">
+            <section className="mt-8 grid gap-6 sm:grid-cols-2">
               {articles.map((article) => (
                 <ArticleCard key={article.id} article={article} />
               ))}
             </section>
 
-            <Pagination currentPage={currentPage} totalPages={totalPages} />
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              query={query}
+            />
 
             <p className="mt-6 text-center text-sm text-kanglu-bordo/50">
-              {total} {total === 1 ? "artigo publicado" : "artigos publicados"}
+              {query
+                ? `${total} ${total === 1 ? "resultado" : "resultados"} para “${query}”`
+                : `${total} ${total === 1 ? "artigo publicado" : "artigos publicados"}`}
             </p>
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * Campo de busca via `next/form`: com `action` string, é um form GET que codifica
+ * o input em `?q=` e navega client-side (com progressive enhancement — funciona
+ * sem JS). Só o campo `q` é enviado, então buscar sempre volta à página 1 (o
+ * `?page=` some). `defaultValue` mantém o termo visível após a busca.
+ */
+function SearchBar({ query }: { query: string }) {
+  return (
+    <Form action="/blog" className="mt-8">
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          {/* Ícone de lupa decorativo dentro do campo. */}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 20 20"
+            fill="none"
+            className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-kanglu-bordo/40"
+          >
+            <circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="2" />
+            <path
+              d="m14 14 3.5 3.5"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+          <input
+            type="search"
+            name="q"
+            defaultValue={query}
+            placeholder="Buscar artigos..."
+            aria-label="Buscar artigos"
+            className="w-full rounded-full border border-kanglu-nude bg-white py-3 pl-11 pr-4 text-kanglu-bordo placeholder:text-kanglu-bordo/40 focus:border-kanglu-orange focus:outline-none focus:ring-2 focus:ring-kanglu-orange/30"
+          />
+        </div>
+
+        <button
+          type="submit"
+          className="rounded-full bg-kanglu-orange px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-kanglu-orange/90"
+        >
+          Buscar
+        </button>
+
+        {/* "Limpar" só faz sentido quando há uma busca ativa. */}
+        {query && (
+          <Link
+            href="/blog"
+            className="text-sm font-medium text-kanglu-orange hover:underline"
+          >
+            Limpar
+          </Link>
+        )}
+      </div>
+    </Form>
+  );
+}
+
+/** Busca sem resultados: mensagem amigável com o termo pesquisado. */
+function NoResults({ query }: { query: string }) {
+  return (
+    <div className="mt-10 rounded-xl border border-dashed border-kanglu-nude bg-white/50 px-6 py-16 text-center">
+      <p className="font-heading text-lg font-semibold text-kanglu-bordo">
+        Nenhum artigo encontrado para “{query}”
+      </p>
+      <p className="mt-2 text-kanglu-bordo/60">
+        Tente outras palavras ou{" "}
+        <Link href="/blog" className="text-kanglu-orange hover:underline">
+          veja todos os artigos
+        </Link>
+        .
+      </p>
     </div>
   );
 }
@@ -132,18 +238,30 @@ function EmptyState() {
 /**
  * Controles de paginação via query param (?page=). Links reais (<a>) para
  * funcionar sem JS e serem rastreáveis. Bordas ficam desabilitadas nas pontas.
+ * Quando há busca ativa, o `q` é preservado nos links para a paginação navegar
+ * DENTRO dos resultados filtrados.
  */
 function Pagination({
   currentPage,
   totalPages,
+  query,
 }: {
   currentPage: number;
   totalPages: number;
+  query: string;
 }) {
   if (totalPages <= 1) return null;
 
   const hasPrev = currentPage > 1;
   const hasNext = currentPage < totalPages;
+
+  // Monta /blog?page=N preservando o termo de busca quando houver.
+  const pageHref = (targetPage: number) => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    params.set("page", String(targetPage));
+    return `/blog?${params.toString()}`;
+  };
 
   const linkBase =
     "rounded-lg border border-kanglu-nude px-4 py-2 text-sm font-medium transition-colors";
@@ -158,7 +276,7 @@ function Pagination({
     >
       {hasPrev ? (
         <Link
-          href={`/blog?page=${currentPage - 1}`}
+          href={pageHref(currentPage - 1)}
           rel="prev"
           className={`${linkBase} ${enabled}`}
         >
@@ -174,7 +292,7 @@ function Pagination({
 
       {hasNext ? (
         <Link
-          href={`/blog?page=${currentPage + 1}`}
+          href={pageHref(currentPage + 1)}
           rel="next"
           className={`${linkBase} ${enabled}`}
         >
