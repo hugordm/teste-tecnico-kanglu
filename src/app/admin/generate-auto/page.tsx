@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AdminHeader } from "../_components/admin-header";
 import { useToast } from "../_components/toast";
 import { apiFetch, ApiError } from "../_lib/api";
@@ -17,11 +17,25 @@ import type { AdminArticle } from "../_lib/types";
 // loading é explícito. Dois erros esperados viram mensagem amigável:
 //   422 = nenhuma fonte não-concorrente encontrada → sugere geração manual.
 //   502 = busca/geração indisponível.
+// A página lê `?theme=` (pauta vinda de /admin/ideas) via useSearchParams, que
+// no Next 16 precisa de um limite de Suspense. O default export só provê esse
+// limite; a tela real vive em GenerateAutoForm.
 export default function GenerateAutoPage() {
+  return (
+    <Suspense fallback={<GenerateAutoFallback />}>
+      <GenerateAutoForm />
+    </Suspense>
+  );
+}
+
+function GenerateAutoForm() {
   const router = useRouter();
   const toast = useToast();
+  const searchParams = useSearchParams();
 
-  const [theme, setTheme] = useState("");
+  // Pré-preenche o tema com a pauta escolhida em /admin/ideas, se houver. Só o
+  // valor INICIAL vem da URL; depois o campo é livre (estado do usuário manda).
+  const [theme, setTheme] = useState(() => searchParams.get("theme") ?? "");
   const [keywords, setKeywords] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +157,19 @@ export default function GenerateAutoPage() {
             {loading && <LoadingMessages messages={GENERATE_AUTO_MESSAGES} />}
           </div>
         </form>
+      </main>
+    </div>
+  );
+}
+
+// Fallback do Suspense enquanto o useSearchParams resolve. Mantém o header e um
+// esqueleto simples pra não piscar a tela.
+function GenerateAutoFallback() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <AdminHeader />
+      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-8 sm:px-8">
+        <div className="h-64 animate-pulse rounded-xl border border-kanglu-nude bg-white/40" />
       </main>
     </div>
   );

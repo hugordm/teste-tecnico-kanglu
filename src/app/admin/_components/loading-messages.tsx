@@ -22,6 +22,13 @@ export const GENERATE_AUTO_MESSAGES = [
   "Finalizando…",
 ];
 
+/** Sequência curta do fluxo de sugestão de pautas (/admin/ideas). */
+export const IDEAS_MESSAGES = [
+  "Pensando em pautas…",
+  "Buscando ângulos no nicho…",
+  "Afinando os títulos…",
+];
+
 /** Sequência do fluxo com URLs fornecidas (/admin/generate). */
 export const GENERATE_URLS_MESSAGES = [
   "Lendo as fontes fornecidas…",

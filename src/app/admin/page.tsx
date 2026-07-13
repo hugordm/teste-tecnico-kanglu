@@ -231,6 +231,13 @@ export default function KanbanPage() {
             </button>
             <button
               type="button"
+              onClick={() => router.push("/admin/ideas")}
+              className="rounded-lg border border-kanglu-orange px-4 py-2 text-sm font-semibold text-kanglu-orange transition-colors hover:bg-kanglu-orange/10"
+            >
+              💡 Sugerir pautas
+            </button>
+            <button
+              type="button"
               onClick={() => router.push("/admin/generate")}
               className="rounded-lg bg-kanglu-orange px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-kanglu-orange/90"
             >
