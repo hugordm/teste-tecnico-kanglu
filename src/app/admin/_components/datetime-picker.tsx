@@ -194,7 +194,7 @@ export function DateTimePicker({
         <div
           role="dialog"
           aria-label="Selecionar data e hora"
-          className="absolute left-0 z-20 mt-2 w-72 rounded-xl border border-kanglu-nude bg-white p-3 shadow-lg"
+          className="absolute left-0 z-20 mt-2 w-72 max-w-[calc(100vw-2.5rem)] max-h-[80vh] overflow-y-auto rounded-xl border border-kanglu-nude bg-white p-3 shadow-lg"
         >
           {/* Navegação de mês/ano */}
           <div className="flex items-center justify-between">

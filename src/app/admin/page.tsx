@@ -220,7 +220,7 @@ export default function KanbanPage() {
               Rascunho → Em revisão → Publicado
             </p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
             <button
               type="button"
               onClick={createManual}
@@ -263,7 +263,7 @@ export default function KanbanPage() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="mt-8 grid gap-5 md:grid-cols-3">
+            <div className="mt-8 grid gap-5 lg:grid-cols-3">
               {COLUMNS.map(({ status, highlight }) => (
                 <Column
                   key={status}
@@ -538,7 +538,7 @@ function QuickBtn({
 
 function LoadingState() {
   return (
-    <div className="mt-8 grid gap-5 md:grid-cols-3">
+    <div className="mt-8 grid gap-5 lg:grid-cols-3">
       {[0, 1, 2].map((i) => (
         <div
           key={i}

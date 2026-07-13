@@ -426,7 +426,7 @@ export default function EditorPage() {
         >
           ← Voltar ao painel
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded px-2 py-1 text-xs font-semibold ${meta.badge}`}>
             {meta.label}
           </span>
