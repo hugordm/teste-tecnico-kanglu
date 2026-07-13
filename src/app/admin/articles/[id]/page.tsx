@@ -4,11 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminHeader } from "../../_components/admin-header";
 import { useToast } from "../../_components/toast";
+import { useConfirm } from "../../_components/confirm";
 import { apiFetch, ApiError } from "../../_lib/api";
 import { STATUS_META, formatDateTime, isScheduled } from "../../_lib/status";
 import type { AdminArticle, AdminSource } from "../../_lib/types";
 import { ArticleBody } from "@/components/article-body";
 import { DateTimePicker } from "../../_components/datetime-picker";
+import {
+  LoadingMessages,
+  GENERATE_URLS_MESSAGES,
+} from "../../_components/loading-messages";
 import { IMAGE_MARKER, imageMarker } from "@/lib/body-images";
 
 // Estado editável do formulário — espelho local do artigo. Datas/slug/status
@@ -56,6 +61,7 @@ export default function EditorPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [article, setArticle] = useState<AdminArticle | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
@@ -210,8 +216,13 @@ export default function EditorPage() {
 
   async function remove() {
     if (!article) return;
-    if (!confirm(`Excluir "${article.title}"? Esta ação não pode ser desfeita.`))
-      return;
+    const ok = await confirm({
+      title: "Excluir artigo",
+      message: `Excluir "${article.title}"? Esta ação não pode ser desfeita.`,
+      confirmLabel: "Excluir",
+      variant: "danger",
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
       await apiFetch(`/api/articles/${id}`, { method: "DELETE" });
@@ -229,10 +240,13 @@ export default function EditorPage() {
   // não salvas do conteúdo, que é justamente o "substituir" combinado).
   async function regenerate() {
     if (!article) return;
-    if (
-      !confirm("Isso vai substituir o conteúdo atual do rascunho. Continuar?")
-    )
-      return;
+    const ok = await confirm({
+      title: "Gerar novamente",
+      message:
+        "Isso vai substituir o conteúdo atual do rascunho. Não dá para desfazer. Continuar?",
+      confirmLabel: "Gerar novamente",
+    });
+    if (!ok) return;
     setRegenerating(true);
     try {
       const data = await apiFetch<{ article: AdminArticle }>(
@@ -472,6 +486,9 @@ export default function EditorPage() {
             {regenerating ? "Gerando…" : "Gerar novamente"}
           </button>
         )}
+        {/* Mesmas mensagens rotativas da geração inicial — o regenerate relê as
+            fontes existentes, então reusa a sequência de URLs. */}
+        {regenerating && <LoadingMessages messages={GENERATE_URLS_MESSAGES} />}
         <button
           type="button"
           onClick={remove}

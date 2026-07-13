@@ -1,4 +1,5 @@
 import { ToastProvider } from "./_components/toast";
+import { ConfirmProvider } from "./_components/confirm";
 
 // Layout de todo o /admin. O ToastProvider precisa envolver as páginas para
 // que qualquer ação (salvar, publicar, gerar…) possa emitir toasts. O acesso
@@ -12,5 +13,9 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <ToastProvider>{children}</ToastProvider>;
+  return (
+    <ToastProvider>
+      <ConfirmProvider>{children}</ConfirmProvider>
+    </ToastProvider>
+  );
 }

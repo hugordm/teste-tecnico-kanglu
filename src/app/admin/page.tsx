@@ -2,8 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import { AdminHeader } from "./_components/admin-header";
 import { useToast } from "./_components/toast";
+import { useConfirm } from "./_components/confirm";
 import { apiFetch, ApiError } from "./_lib/api";
 import { STATUS_META, formatDate, formatDateTime, isScheduled } from "./_lib/status";
 import type { AdminArticle, ArticleStatus } from "./_lib/types";
@@ -19,6 +32,7 @@ const COLUMNS: { status: ArticleStatus; highlight: boolean }[] = [
 export default function KanbanPage() {
   const router = useRouter();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [articles, setArticles] = useState<AdminArticle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +40,8 @@ export default function KanbanPage() {
   // id do card em ação — desabilita seus botões e evita cliques duplos.
   const [busyId, setBusyId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // id do card sendo arrastado agora — alimenta o <DragOverlay>.
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   // Não seta estado de forma síncrona: o primeiro setState só ocorre depois do
   // await (satisfaz a regra set-state-in-effect). O estado inicial já é
@@ -54,6 +70,32 @@ export default function KanbanPage() {
     load();
   }, [load]);
 
+  // Sensores: ponteiro (mouse/touch/caneta) com constraint de 8px — só começa a
+  // arrastar depois de mover um pouco, então cliques no card/botões/alça
+  // continuam funcionando. Teclado como reforço de acessibilidade (os botões
+  // seguem sendo o caminho acessível principal).
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveId(String(event.active.id));
+  }
+
+  // Soltou: se caiu sobre uma coluna diferente, move (a própria moveArticle trata
+  // no-op na mesma coluna, otimismo e rollback). `over.id` é o status da coluna.
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveId(null);
+    const { active, over } = event;
+    if (!over) return;
+    moveArticle(String(active.id), over.id as ArticleStatus);
+  }
+
+  const activeArticle = activeId
+    ? articles.find((a) => a.id === activeId) ?? null
+    : null;
+
   // Retry é disparado por evento do usuário (pode setar estado à vontade).
   function retry() {
     setLoading(true);
@@ -61,50 +103,63 @@ export default function KanbanPage() {
     load();
   }
 
-  // Move o artigo entre rascunho e revisão (PATCH). Atualiza o card no lugar.
-  async function changeStatus(id: string, status: ArticleStatus) {
-    setBusyId(id);
-    try {
-      const data = await apiFetch<{ article: AdminArticle }>(
-        `/api/articles/${id}`,
-        { method: "PATCH", body: { status } },
-      );
-      setArticles((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, status: data.article.status } : a)),
-      );
-      toast.success(`Movido para "${STATUS_META[status].label}".`);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Não foi possível mover.");
-    } finally {
-      setBusyId(null);
-    }
-  }
+  // Move um artigo para outro status — usado tanto pelo DRAG (soltar numa coluna)
+  // quanto pelos botões de ação. É OTIMISTA COM ROLLBACK: troca o status no
+  // estado na hora (o card salta pra coluna nova), chama a API e, se ela falhar,
+  // reverte para o status anterior + avisa. O SERVIDOR é a fonte da verdade — a
+  // persistência só acontece se ele aceitar, então o portão de publicação não é
+  // furado pelo drag.
+  //
+  // Rota conforme o alvo: published passa pelo portão POST /publish (422 = sem
+  // fonte válida → rollback); draft/in_review vão por PATCH.
+  async function moveArticle(id: string, target: ArticleStatus) {
+    const current = articles.find((a) => a.id === id);
+    if (!current || current.status === target) return; // no-op na mesma coluna
+    const previousStatus = current.status;
 
-  // Publica (portão /publish). 422 = sem fonte válida: mostra o motivo e NÃO
-  // publica; o card fica onde está.
-  async function publish(id: string) {
+    // Movimento otimista.
+    setArticles((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: target } : a)),
+    );
     setBusyId(id);
     try {
-      const data = await apiFetch<{ article: AdminArticle }>(
-        `/api/articles/${id}/publish`,
-        { method: "POST" },
-      );
-      setArticles((prev) =>
-        prev.map((a) =>
-          a.id === id
-            ? { ...a, status: "published", publishedAt: data.article.publishedAt }
-            : a,
-        ),
-      );
-      toast.success("Artigo publicado.");
+      if (target === "published") {
+        const data = await apiFetch<{ article: AdminArticle }>(
+          `/api/articles/${id}/publish`,
+          { method: "POST" },
+        );
+        setArticles((prev) =>
+          prev.map((a) =>
+            a.id === id
+              ? { ...a, status: "published", publishedAt: data.article.publishedAt }
+              : a,
+          ),
+        );
+        toast.success("Artigo publicado.");
+      } else {
+        const data = await apiFetch<{ article: AdminArticle }>(
+          `/api/articles/${id}`,
+          { method: "PATCH", body: { status: target } },
+        );
+        setArticles((prev) =>
+          prev.map((a) =>
+            a.id === id ? { ...a, status: data.article.status } : a,
+          ),
+        );
+        toast.success(`Movido para "${STATUS_META[target].label}".`);
+      }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 422) {
+      // Rollback: o card volta pra coluna de origem.
+      setArticles((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, status: previousStatus } : a)),
+      );
+      if (target === "published" && err instanceof ApiError && err.status === 422) {
         toast.error(
-          "Adicione ao menos uma fonte com URL válida antes de publicar.",
+          "Não é possível publicar sem uma fonte válida. Adicione ao menos uma fonte com URL (http/https) no editor.",
         );
       } else {
         toast.error(
-          err instanceof ApiError ? err.message : "Não foi possível publicar.",
+          err instanceof ApiError ? err.message : "Não foi possível mover.",
         );
       }
     } finally {
@@ -113,7 +168,13 @@ export default function KanbanPage() {
   }
 
   async function remove(id: string, title: string) {
-    if (!confirm(`Excluir "${title}"? Esta ação não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Excluir artigo",
+      message: `Excluir "${title}"? Esta ação não pode ser desfeita.`,
+      confirmLabel: "Excluir",
+      variant: "danger",
+    });
+    if (!ok) return;
     setBusyId(id);
     try {
       await apiFetch(`/api/articles/${id}`, { method: "DELETE" });
@@ -190,21 +251,32 @@ export default function KanbanPage() {
         ) : error ? (
           <ErrorState message={error} onRetry={retry} />
         ) : (
-          <div className="mt-8 grid gap-5 md:grid-cols-3">
-            {COLUMNS.map(({ status, highlight }) => (
-              <Column
-                key={status}
-                status={status}
-                highlight={highlight}
-                articles={articles.filter((a) => a.status === status)}
-                busyId={busyId}
-                onOpen={(id) => router.push(`/admin/articles/${id}`)}
-                onChangeStatus={changeStatus}
-                onPublish={publish}
-                onDelete={remove}
-              />
-            ))}
-          </div>
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="mt-8 grid gap-5 md:grid-cols-3">
+              {COLUMNS.map(({ status, highlight }) => (
+                <Column
+                  key={status}
+                  status={status}
+                  highlight={highlight}
+                  articles={articles.filter((a) => a.status === status)}
+                  busyId={busyId}
+                  activeId={activeId}
+                  onOpen={(id) => router.push(`/admin/articles/${id}`)}
+                  onMove={moveArticle}
+                  onDelete={remove}
+                />
+              ))}
+            </div>
+
+            {/* Card "levantado" que segue o cursor durante o arraste. */}
+            <DragOverlay>
+              {activeArticle ? <CardOverlay article={activeArticle} /> : null}
+            </DragOverlay>
+          </DndContext>
         )}
       </main>
     </div>
@@ -216,26 +288,36 @@ function Column({
   highlight,
   articles,
   busyId,
+  activeId,
   onOpen,
-  onChangeStatus,
-  onPublish,
+  onMove,
   onDelete,
 }: {
   status: ArticleStatus;
   highlight: boolean;
   articles: AdminArticle[];
   busyId: string | null;
+  activeId: string | null;
   onOpen: (id: string) => void;
-  onChangeStatus: (id: string, status: ArticleStatus) => void;
-  onPublish: (id: string) => void;
+  onMove: (id: string, status: ArticleStatus) => void;
   onDelete: (id: string, title: string) => void;
 }) {
+  // Zona de soltura: o id da coluna é o próprio status, lido no onDragEnd.
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  // Destaca a coluna quando um card está sendo arrastado por cima — mas não a
+  // própria coluna de origem do card (soltar ali é no-op).
+  const activeIsFromHere = articles.some((a) => a.id === activeId);
+  const dropActive = isOver && !activeIsFromHere;
+
   return (
     <section
-      className={`rounded-xl border p-4 ${
-        highlight
-          ? "border-kanglu-orange bg-kanglu-orange/5"
-          : "border-kanglu-nude bg-white/50"
+      ref={setNodeRef}
+      className={`rounded-xl border p-4 transition-colors ${
+        dropActive
+          ? "border-kanglu-orange bg-kanglu-orange/10 ring-2 ring-kanglu-orange/40"
+          : highlight
+            ? "border-kanglu-orange bg-kanglu-orange/5"
+            : "border-kanglu-nude bg-white/50"
       }`}
     >
       <h2 className="flex items-center gap-2 font-heading text-sm font-semibold uppercase tracking-wide text-kanglu-bordo">
@@ -247,8 +329,14 @@ function Column({
 
       <div className="mt-4 space-y-3">
         {articles.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-kanglu-nude px-3 py-6 text-center text-sm text-kanglu-bordo/40">
-            Nenhum artigo
+          <p
+            className={`rounded-lg border border-dashed px-3 py-6 text-center text-sm ${
+              dropActive
+                ? "border-kanglu-orange text-kanglu-orange"
+                : "border-kanglu-nude text-kanglu-bordo/40"
+            }`}
+          >
+            {dropActive ? "Soltar aqui" : "Nenhum artigo"}
           </p>
         ) : (
           articles.map((article) => (
@@ -257,8 +345,7 @@ function Column({
               article={article}
               busy={busyId === article.id}
               onOpen={onOpen}
-              onChangeStatus={onChangeStatus}
-              onPublish={onPublish}
+              onMove={onMove}
               onDelete={onDelete}
             />
           ))
@@ -272,15 +359,13 @@ function ArticleCard({
   article,
   busy,
   onOpen,
-  onChangeStatus,
-  onPublish,
+  onMove,
   onDelete,
 }: {
   article: AdminArticle;
   busy: boolean;
   onOpen: (id: string) => void;
-  onChangeStatus: (id: string, status: ArticleStatus) => void;
-  onPublish: (id: string) => void;
+  onMove: (id: string, status: ArticleStatus) => void;
   onDelete: (id: string, title: string) => void;
 }) {
   const meta = STATUS_META[article.status];
@@ -291,15 +376,40 @@ function ArticleCard({
     fn();
   };
 
+  // Draggable: o card inteiro é o nó que se move (referência), mas só a ALÇA
+  // dispara o arraste (setActivatorNodeRef + listeners). Assim o clique no corpo
+  // segue abrindo o editor e os botões continuam clicáveis. Com o <DragOverlay>,
+  // o original só é esmaecido enquanto arrasta — quem "voa" é o overlay.
+  const { setNodeRef, setActivatorNodeRef, listeners, attributes, isDragging } =
+    useDraggable({ id: article.id });
+
   return (
     <article
+      ref={setNodeRef}
       onClick={() => onOpen(article.id)}
-      className="group cursor-pointer rounded-lg border border-kanglu-nude bg-white p-3 transition-colors hover:border-kanglu-orange"
+      className={`group rounded-lg border border-kanglu-nude bg-white p-3 transition-colors hover:border-kanglu-orange ${
+        isDragging ? "cursor-grabbing opacity-40" : "cursor-pointer"
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-heading text-sm font-semibold text-kanglu-bordo group-hover:text-kanglu-orange">
-          {article.title}
-        </h3>
+        <div className="flex min-w-0 items-start gap-1.5">
+          {/* Alça de arraste — carrega os listeners do dnd-kit. */}
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            {...listeners}
+            {...attributes}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Arrastar "${article.title}" para mover de coluna`}
+            title="Arraste para mover entre colunas"
+            className="-ml-1 shrink-0 cursor-grab touch-none rounded px-1 text-kanglu-bordo/30 hover:bg-kanglu-cream hover:text-kanglu-bordo/60 active:cursor-grabbing"
+          >
+            ⠿
+          </button>
+          <h3 className="min-w-0 font-heading text-sm font-semibold text-kanglu-bordo group-hover:text-kanglu-orange">
+            {article.title}
+          </h3>
+        </div>
         {article.aiAssisted && (
           <span
             title="Rascunho assistido por IA"
@@ -330,16 +440,16 @@ function ArticleCard({
       {/* Ações rápidas por status. */}
       <div className="mt-3 flex flex-wrap gap-2 border-t border-kanglu-nude/60 pt-3">
         {article.status === "draft" && (
-          <QuickBtn onClick={stop(() => onChangeStatus(article.id, "in_review"))} disabled={busy}>
+          <QuickBtn onClick={stop(() => onMove(article.id, "in_review"))} disabled={busy}>
             Enviar p/ revisão
           </QuickBtn>
         )}
         {article.status === "in_review" && (
           <>
-            <QuickBtn primary onClick={stop(() => onPublish(article.id))} disabled={busy}>
+            <QuickBtn primary onClick={stop(() => onMove(article.id, "published"))} disabled={busy}>
               Publicar
             </QuickBtn>
-            <QuickBtn onClick={stop(() => onChangeStatus(article.id, "draft"))} disabled={busy}>
+            <QuickBtn onClick={stop(() => onMove(article.id, "draft"))} disabled={busy}>
               Voltar p/ rascunho
             </QuickBtn>
           </>
@@ -355,7 +465,7 @@ function ArticleCard({
             >
               Ver no blog ↗
             </a>
-            <QuickBtn onClick={stop(() => onChangeStatus(article.id, "in_review"))} disabled={busy}>
+            <QuickBtn onClick={stop(() => onMove(article.id, "in_review"))} disabled={busy}>
               Despublicar
             </QuickBtn>
           </>
@@ -364,6 +474,27 @@ function ArticleCard({
           Excluir
         </QuickBtn>
       </div>
+    </article>
+  );
+}
+
+// Card renderizado dentro do <DragOverlay> — o que "voa" com o cursor. Estático
+// (sem handlers), com sombra/escala pra dar a sensação de "levantado".
+function CardOverlay({ article }: { article: AdminArticle }) {
+  const meta = STATUS_META[article.status];
+  return (
+    <article className="w-full max-w-xs rotate-2 cursor-grabbing rounded-lg border border-kanglu-orange bg-white p-3 shadow-xl">
+      <div className="flex items-start gap-1.5">
+        <span className="text-kanglu-bordo/40">⠿</span>
+        <h3 className="font-heading text-sm font-semibold text-kanglu-bordo">
+          {article.title}
+        </h3>
+      </div>
+      <span
+        className={`mt-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${meta.badge}`}
+      >
+        {meta.label}
+      </span>
     </article>
   );
 }
