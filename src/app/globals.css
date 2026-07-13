@@ -19,6 +19,15 @@
 }
 
 /*
+ * Scroll suave ao clicar num link do índice do artigo (âncoras #id). Puro CSS —
+ * o índice (TableOfContents) não precisa de JS. O respiro no topo do alvo vem do
+ * `scroll-mt-*` aplicado nos próprios headings h2/h3.
+ */
+html {
+  scroll-behavior: smooth;
+}
+
+/*
  * Base sóbria do brandguide: fundo creme, texto em bordô, corpo em Inter.
  * Sem dark-mode aqui — a paleta da marca é fixa (mockups são light).
  */
