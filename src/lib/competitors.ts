@@ -58,6 +58,12 @@ export const COMPETITOR_DOMAINS: string[] = [
   "nuvemshop.com.br",
   "tray.com.br",
 
+  // Plataformas de e-commerce / automação comercial / agências
+  "wake.tech",
+  "sweda.com.br",
+  "caravel.com.br",
+  "quatrocor.com.br",
+
   // Vídeo / redes (não é fonte adequada para artigo)
   "youtube.com",
 ];
