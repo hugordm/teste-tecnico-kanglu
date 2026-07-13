@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ArticleMarkdown } from "@/components/article-markdown";
+import { ArticleBody } from "@/components/article-body";
 import { SiteHeader } from "@/components/site-header";
 import {
   getPublishedArticleBySlug,
@@ -133,42 +133,16 @@ export default async function ArticlePage({ params }: Props) {
             </p>
           )}
 
-          {/* Imagem ilustrativa no topo, com crédito do modelo logo abaixo.
-              Só aparece quando o artigo tem imagem — do contrário o layout segue
-              normal (imagem é opcional). */}
-          {article.ogImage && (
-            <figure className="mt-8">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={article.ogImage}
-                alt={`Ilustração do artigo: ${article.title}`}
-                className="w-full rounded-xl border border-kanglu-nude object-cover"
-              />
-              {article.imageCredit && (
-                <figcaption className="mt-2 text-xs text-kanglu-bordo/50">
-                  Crédito da imagem:{" "}
-                  {article.imageSourceUrl ? (
-                    <a
-                      href={article.imageSourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-kanglu-orange hover:underline"
-                    >
-                      {article.imageCredit}
-                    </a>
-                  ) : (
-                    article.imageCredit
-                  )}
-                </figcaption>
-              )}
-            </figure>
-          )}
-
-          {/* Corpo em markdown, estilizado com as cores da marca. Imagens do
-              corpo (marcador [[imagem:URL]]) usam o título no alt. */}
-          <div className="mt-8">
-            <ArticleMarkdown content={article.content} title={article.title} />
-          </div>
+          {/* Capa + corpo via componente COMPARTILHADO com a prévia do editor —
+              mesma aparência garantida (capa com crédito no topo + imagens do
+              corpo). */}
+          <ArticleBody
+            title={article.title}
+            content={article.content}
+            ogImage={article.ogImage}
+            imageCredit={article.imageCredit}
+            imageSourceUrl={article.imageSourceUrl}
+          />
 
           <SourcesSection sources={article.sources} />
         </article>

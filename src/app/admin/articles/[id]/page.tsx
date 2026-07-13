@@ -7,7 +7,7 @@ import { useToast } from "../../_components/toast";
 import { apiFetch, ApiError } from "../../_lib/api";
 import { STATUS_META, formatDateTime, isScheduled } from "../../_lib/status";
 import type { AdminArticle, AdminSource } from "../../_lib/types";
-import { ArticleMarkdown } from "@/components/article-markdown";
+import { ArticleBody } from "@/components/article-body";
 import { IMAGE_MARKER, imageMarker } from "@/lib/body-images";
 
 // Estado editável do formulário — espelho local do artigo. Datas/slug/status
@@ -482,7 +482,13 @@ export default function EditorPage() {
       </div>
 
       {preview ? (
-        <PreviewPane title={form.title} content={form.content} />
+        <PreviewPane
+          title={form.title}
+          content={form.content}
+          ogImage={form.ogImage}
+          imageCredit={article.imageCredit}
+          imageSourceUrl={article.imageSourceUrl}
+        />
       ) : (
         <div className="mt-6 space-y-6">
           {/* Estado de workflow */}
@@ -906,7 +912,23 @@ function Field({
   );
 }
 
-function PreviewPane({ title, content }: { title: string; content: string }) {
+// Prévia: mesma capa + corpo do blog público, via o componente COMPARTILHADO
+// ArticleBody. Usa os dados AO VIVO do editor (form.ogImage, form.content),
+// então mostra a capa selecionada e o conteúdo mesmo antes de salvar. Crédito da
+// imagem vem do artigo (imageCredit/imageSourceUrl não são editáveis no form).
+function PreviewPane({
+  title,
+  content,
+  ogImage,
+  imageCredit,
+  imageSourceUrl,
+}: {
+  title: string;
+  content: string;
+  ogImage: string;
+  imageCredit: string | null;
+  imageSourceUrl: string | null;
+}) {
   return (
     <div className="mt-6 rounded-xl border border-kanglu-nude bg-white p-6 sm:p-8">
       <p className="mb-4 text-xs font-semibold uppercase tracking-wide text-kanglu-orange">
@@ -916,9 +938,13 @@ function PreviewPane({ title, content }: { title: string; content: string }) {
         <h1 className="font-heading text-3xl font-bold leading-tight text-kanglu-bordo">
           {title}
         </h1>
-        <div className="mt-6">
-          <ArticleMarkdown content={content} title={title} />
-        </div>
+        <ArticleBody
+          title={title}
+          content={content}
+          ogImage={ogImage}
+          imageCredit={imageCredit}
+          imageSourceUrl={imageSourceUrl}
+        />
       </article>
     </div>
   );
