@@ -1,5 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { Metadata } from "next";
+import { SITE_URL } from "@/lib/site";
+
+// Canônica da home — mesma base do sitemap/JSON-LD. `${SITE_URL}/` casa com a
+// entrada da home no sitemap.
+export const metadata: Metadata = {
+  alternates: { canonical: `${SITE_URL}/` },
+};
 
 // Home institucional do Blog Kanglu. Página estática e sóbria com a identidade
 // da marca (creme, bordô, laranja) e um único caminho: entrar no /blog.

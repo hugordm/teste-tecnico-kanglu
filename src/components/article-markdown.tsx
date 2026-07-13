@@ -1,5 +1,6 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { splitContentByImageMarker } from "@/lib/body-images";
 
 // Renderer de markdown compartilhado entre o blog público e o PREVIEW do editor
 // admin — é a mesma aparência que o leitor final verá. Sem "use client": o
@@ -83,13 +84,46 @@ const components: Components = {
   ),
 };
 
-/** Corpo do artigo (markdown) renderizado com as cores da marca. */
-export function ArticleMarkdown({ content }: { content: string }) {
+/**
+ * Corpo do artigo (markdown) renderizado com as cores da marca.
+ *
+ * Antes de renderizar, o `content` é quebrado nos marcadores `[[imagem:URL]]`
+ * (imagens do corpo, Etapa 3): cada trecho de texto vai pro react-markdown; cada
+ * marcador vira um `<figure>` injetado — o parser do remark nunca vê o marcador,
+ * evitando colisão com link references do CommonMark. Sem marcador, é um único
+ * trecho de texto (idêntico ao render anterior). `title` alimenta o alt.
+ */
+export function ArticleMarkdown({
+  content,
+  title,
+}: {
+  content: string;
+  title?: string;
+}) {
+  const parts = splitContentByImageMarker(content);
+
   return (
     <div className="leading-relaxed text-kanglu-bordo/90">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
-      </ReactMarkdown>
+      {parts.map((part, i) =>
+        part.type === "text" ? (
+          <ReactMarkdown
+            key={i}
+            remarkPlugins={[remarkGfm]}
+            components={components}
+          >
+            {part.value}
+          </ReactMarkdown>
+        ) : (
+          <figure key={i} className="my-8">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={part.url}
+              alt={title ? `Imagem do artigo: ${title}` : "Imagem do artigo"}
+              className="w-full rounded-xl border border-kanglu-nude object-cover"
+            />
+          </figure>
+        ),
+      )}
     </div>
   );
 }

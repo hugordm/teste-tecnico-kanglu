@@ -39,6 +39,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const title = article.metaTitle ?? article.title;
   const description = article.metaDescription ?? article.excerpt ?? undefined;
 
+  // Canônica: a canonicalUrl explícita (override manual), se houver; senão a
+  // própria URL pública do artigo. Mesma base/regra do JSON-LD e do sitemap.
+  const canonical = article.canonicalUrl ?? `${SITE_URL}/blog/${article.slug}`;
+
   return {
     title,
     description,
@@ -48,9 +52,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       type: "article",
       ...(article.ogImage ? { images: [article.ogImage] } : {}),
     },
-    ...(article.canonicalUrl
-      ? { alternates: { canonical: article.canonicalUrl } }
-      : {}),
+    alternates: { canonical },
   };
 }
 
@@ -162,9 +164,10 @@ export default async function ArticlePage({ params }: Props) {
             </figure>
           )}
 
-          {/* Corpo em markdown, estilizado com as cores da marca. */}
+          {/* Corpo em markdown, estilizado com as cores da marca. Imagens do
+              corpo (marcador [[imagem:URL]]) usam o título no alt. */}
           <div className="mt-8">
-            <ArticleMarkdown content={article.content} />
+            <ArticleMarkdown content={article.content} title={article.title} />
           </div>
 
           <SourcesSection sources={article.sources} />

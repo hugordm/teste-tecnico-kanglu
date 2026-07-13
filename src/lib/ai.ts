@@ -94,6 +94,7 @@ REGRAS DE ESCRITA:
 - Estruture o conteúdo em markdown: use ## para seções e listas quando fizer sentido.
 - O texto deve ser original, coerente e útil para quem tem uma loja online.
 - NÃO use marcações de citação numeradas como [1], [2], [3] no texto. Escreva o conteúdo de forma fluida. As fontes serão listadas separadamente.
+- NÃO use notação LaTeX ou matemática (ex: \\text{}, \\times, \\div, \\frac, cifrões de fórmula ou colchetes de equação). Escreva fórmulas em texto simples e legível — ex: "Altura × Largura × Comprimento ÷ 6.000", usando os símbolos × e ÷ diretamente no texto.
 
 FORMATO DE SAÍDA (obrigatório):
 Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cercas de código, com exatamente estas chaves:

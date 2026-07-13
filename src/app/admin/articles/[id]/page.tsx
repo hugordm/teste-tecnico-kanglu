@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminHeader } from "../../_components/admin-header";
 import { useToast } from "../../_components/toast";
@@ -8,6 +8,7 @@ import { apiFetch, ApiError } from "../../_lib/api";
 import { STATUS_META, formatDateTime, isScheduled } from "../../_lib/status";
 import type { AdminArticle, AdminSource } from "../../_lib/types";
 import { ArticleMarkdown } from "@/components/article-markdown";
+import { IMAGE_MARKER, imageMarker } from "@/lib/body-images";
 
 // Estado editável do formulário — espelho local do artigo. Datas/slug/status
 // vêm do artigo mas nem tudo é editável aqui (slug é derivado do título pela
@@ -67,6 +68,10 @@ export default function EditorPage() {
   const [regenerating, setRegenerating] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [preview, setPreview] = useState(false);
+
+  // Ref do textarea de conteúdo — usado pra inserir o marcador de imagem no
+  // corpo exatamente na posição do cursor (selectionStart/End).
+  const contentRef = useRef<HTMLTextAreaElement>(null);
 
   // Sem setState síncrono: o primeiro setState só acontece após o await (regra
   // set-state-in-effect). Estado inicial já é loading=true / loadError=null.
@@ -288,6 +293,52 @@ export default function EditorPage() {
     set("ogImage", url);
   }
 
+  // Inserir uma imagem NO CORPO: escreve o marcador `[[imagem:URL]]` na posição
+  // do cursor do textarea de conteúdo (em linha própria). Só mexe no texto local
+  // — a URL passa a estar no content, o que também a protege da limpeza do Blob
+  // ao salvar (content.includes). Reusa imagens já geradas; não sobe nada novo.
+  function insertBodyImage(url: string) {
+    const marker = imageMarker(url);
+    setForm((prev) => {
+      if (!prev) return prev;
+      const el = contentRef.current;
+      const text = prev.content;
+      const start = el?.selectionStart ?? text.length;
+      const end = el?.selectionEnd ?? text.length;
+      const before = text.slice(0, start);
+      const after = text.slice(end);
+      // Garante o marcador isolado em bloco: quebras antes (se já não houver) e
+      // depois. Linhas em branco extras são inofensivas no markdown.
+      const lead = before === "" || before.endsWith("\n") ? "" : "\n\n";
+      const newContent = `${before}${lead}${marker}\n\n${after}`;
+      return { ...prev, content: newContent };
+    });
+    toast.success("Imagem inserida no conteúdo.");
+  }
+
+  // Remove do conteúdo TODAS as ocorrências do marcador desta imagem, junto com
+  // as quebras de linha que o cercavam, e colapsa o espaço que sobra num único
+  // separador de parágrafo. Como `isInserted` deriva de `content.includes`, o
+  // selo "✓ Inserida" some sozinho e o botão volta a "Inserir no texto".
+  function removeBodyImage(url: string) {
+    const marker = imageMarker(url);
+    // Escapa os caracteres especiais de regex do marcador (a URL tem . / ? etc.).
+    const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Casa o marcador + qualquer whitespace/quebras ao redor, trocando por uma
+    // separação de parágrafo limpa.
+    const re = new RegExp(`\\n*[ \\t]*${esc}[ \\t]*\\n*`, "g");
+    setForm((prev) => {
+      if (!prev) return prev;
+      const cleaned = prev.content
+        .replace(re, "\n\n")
+        .replace(/\n{3,}/g, "\n\n") // colapsa excesso de linhas em branco
+        .replace(/^\n+/, "") // sem linhas em branco no início
+        .trimEnd();
+      return { ...prev, content: cleaned };
+    });
+    toast.success("Imagem removida do conteúdo.");
+  }
+
   // --- Fontes ---
   function addSource() {
     setSources((prev) => [...prev, { title: "", url: "" }]);
@@ -333,6 +384,16 @@ export default function EditorPage() {
   const hasImage = isHttpUrl(form.ogImage);
   // Há opções pendentes de escolha? (galeria em vez de capa única)
   const hasOptions = article.imageOptions.length > 0;
+
+  // Pool de imagens que o usuário pode inserir no CORPO: a capa marcada + as 4
+  // opções geradas + qualquer imagem já referenciada no texto (pra reinserir).
+  // Dedup e só URLs http válidas. Tudo já existe no Blob — inserir não gera nada.
+  const bodyImageRefs = Array.from(form.content.matchAll(IMAGE_MARKER), (m) => m[1]);
+  const insertPool = Array.from(
+    new Set(
+      [form.ogImage, ...article.imageOptions, ...bodyImageRefs].filter(isHttpUrl),
+    ),
+  );
   // O campo de agendamento só faz sentido enquanto o artigo NÃO está visível no
   // blog: rascunho, em revisão, ou publicado porém ainda agendado p/ o futuro.
   // Publicado e já no ar (publishAt nulo ou no passado) esconde o campo — evita
@@ -573,6 +634,89 @@ export default function EditorPage() {
                   ? "Gerar novamente"
                   : "Gerar imagem"}
             </button>
+
+            {/* Imagens no corpo (Etapa 3): reusa as imagens já geradas. Insere o
+                marcador [[imagem:URL]] na posição do cursor do conteúdo. */}
+            {insertPool.length > 0 && (
+              <div className="mt-5 border-t border-kanglu-nude pt-4">
+                <p className="text-sm font-medium text-kanglu-bordo">
+                  Imagens no corpo
+                </p>
+                <p className="mt-1 text-xs text-kanglu-bordo/50">
+                  Posicione o cursor no conteúdo onde quer a imagem e clique em
+                  “Inserir no texto”. A imagem aparece naquele ponto do artigo,
+                  além da capa. Reusa as opções já geradas — nada novo é gerado. A
+                  imagem usada como <strong>capa</strong> não entra no corpo; troque
+                  a capa e ela fica disponível. Uma imagem no corpo é preservada ao
+                  salvar.
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {insertPool.map((url) => {
+                    // Estados reativos: a capa atual (ogImage) não é inserível; e
+                    // uma imagem já presente no texto ganha o selo "Inserida"
+                    // (some sozinho se o marcador for apagado do conteúdo).
+                    const isCover = url === form.ogImage;
+                    const isInserted = !isCover && form.content.includes(url);
+                    return (
+                      <div
+                        key={url}
+                        className={`relative overflow-hidden rounded-lg border-2 transition-colors ${
+                          isInserted
+                            ? "border-kanglu-orange ring-2 ring-kanglu-orange/30"
+                            : "border-kanglu-nude"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt=""
+                          className={`aspect-video w-full object-cover ${
+                            isCover ? "opacity-50" : ""
+                          }`}
+                        />
+                        {isCover && (
+                          <span className="absolute left-2 top-2 rounded-full bg-kanglu-bordo/80 px-2 py-0.5 text-xs font-semibold text-white shadow">
+                            Capa
+                          </span>
+                        )}
+                        {isInserted && (
+                          <span className="absolute left-2 top-2 rounded-full bg-kanglu-orange px-2 py-0.5 text-xs font-semibold text-white shadow">
+                            ✓ Inserida
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            isInserted
+                              ? removeBodyImage(url)
+                              : insertBodyImage(url)
+                          }
+                          disabled={isCover}
+                          title={
+                            isCover
+                              ? "Esta imagem é a capa — troque a capa para liberá-la para o corpo"
+                              : isInserted
+                                ? "Remove todas as ocorrências desta imagem do conteúdo"
+                                : "Insere o marcador da imagem na posição do cursor"
+                          }
+                          className={`block w-full px-2 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-white disabled:text-kanglu-bordo/30 ${
+                            isInserted
+                              ? "bg-white text-red-600 hover:bg-red-50"
+                              : "bg-white text-kanglu-orange hover:bg-kanglu-orange/10"
+                          }`}
+                        >
+                          {isCover
+                            ? "É a capa"
+                            : isInserted
+                              ? "Remover do texto"
+                              : "Inserir no texto"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </Section>
 
           {/* Conteúdo principal */}
@@ -608,6 +752,7 @@ export default function EditorPage() {
             <Field label="Conteúdo (Markdown)" htmlFor="content">
               <textarea
                 id="content"
+                ref={contentRef}
                 rows={16}
                 value={form.content}
                 onChange={(e) => set("content", e.target.value)}
@@ -772,7 +917,7 @@ function PreviewPane({ title, content }: { title: string; content: string }) {
           {title}
         </h1>
         <div className="mt-6">
-          <ArticleMarkdown content={content} />
+          <ArticleMarkdown content={content} title={title} />
         </div>
       </article>
     </div>

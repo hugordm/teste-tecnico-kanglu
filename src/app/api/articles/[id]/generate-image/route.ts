@@ -60,7 +60,15 @@ export async function POST(req: Request, { params }: Params) {
   // opções pendentes + a capa que estava em uso, se for do nosso Blob). Feito
   // DEPOIS de gerar as novas: se a geração falhasse, o artigo continuaria com as
   // imagens antigas intactas. deleteArticleImages nunca lança.
-  await deleteArticleImages([...existing.imageOptions, existing.ogImage ?? ""]);
+  //
+  // PROTEÇÃO (Etapa 3): NÃO apagamos imagens referenciadas no CORPO do artigo
+  // (marcador `[[imagem:URL]]`) — "gerar novamente" troca as opções/capa, mas
+  // uma imagem já inserida no texto tem que sobreviver. `content.includes(url)`
+  // protege qualquer referência.
+  const toDelete = [...existing.imageOptions, existing.ogImage ?? ""].filter(
+    (u) => u && !existing.content.includes(u),
+  );
+  await deleteArticleImages(toDelete);
 
   // Só aqui tocamos o artigo: novas opções + a 1ª como capa padrão.
   const article = await prisma.article.update({

@@ -46,6 +46,7 @@ Retorna um artigo com suas fontes. `200` · `404` · `401`.
 Edita um artigo. Aceita `draft`, `in_review`, `archived` — **não** aceita `published`.
 As fontes, se enviadas, substituem o conjunto atual.
 Campo `publishAt` (ISO em UTC, ou `null`): **agenda** a partir de quando o artigo publicado aparece no blog. `null` (ou ausente na criação) = aparece assim que publicado.
+Salvar **confirma a escolha da capa**: se havia opções pendentes (`imageOptions`), a marcada (campo OG) vira definitiva e as demais são apagadas do Blob — **exceto** as referenciadas no `content` (imagens do corpo via marcador `[[imagem:URL]]`), preservadas por `content.includes(url)`.
 **Respostas:** `200` · `400` (inclui tentativa de setar `published`) · `404` · `401`.
 
 ### `DELETE /api/articles/[id]`
@@ -77,12 +78,15 @@ Geração por **busca automática na web**. Recebe apenas o tema; o Perplexity S
 **Respostas:** `201` (draft com fontes reais) · `422` se nenhuma fonte não-concorrente for encontrada · `400` · `401` · `502`.
 
 ### `POST /api/articles/[id]/generate-image`
-"Gerar novamente": gera **4 opções** de capa via Nano Banana 2 **em paralelo**, faz upload no Vercel Blob e as grava em `imageOptions`; a 1ª que der certo vira a capa padrão (campo de imagem OG) + crédito. Apaga do Blob as imagens anteriores (opções pendentes + capa em uso) que serão substituídas.
+"Gerar novamente": gera **4 opções** de capa via Nano Banana 2 **em paralelo**, faz upload no Vercel Blob e as grava em `imageOptions`; a 1ª que der certo vira a capa padrão (campo de imagem OG) + crédito. Apaga do Blob as imagens anteriores (opções pendentes + capa em uso) que serão substituídas — **exceto** as referenciadas no `content` (imagens do corpo), preservadas por `content.includes(url)`.
 
 **Respostas:** `200` (artigo com novas opções) · `404` · `401` · `502` (todas falharam, sem corromper o artigo).
 
 ### Escolha da capa (sem endpoint dedicado)
 A escolha entre as `imageOptions` é feita no editor (estado local, reversível) e **confirmada ao salvar** o artigo via `PATCH /api/articles/[id]`: a opção marcada (campo OG) vira definitiva, as demais são apagadas do Blob e `imageOptions` é esvaziado.
+
+### Imagens no corpo (sem endpoint dedicado)
+O editor insere o marcador `[[imagem:URL]]` (URL de uma imagem já gerada — capa ou opção) no `content`, na posição do cursor. O render (`article-markdown`) troca cada marcador por um `<figure>`. Persistência é o próprio `content` — sem campo novo — e a presença da URL no texto protege a imagem da limpeza do Blob (ver `PATCH` e `generate-image`).
 
 ---
 

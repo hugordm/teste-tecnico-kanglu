@@ -2,10 +2,13 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { SiteHeader } from "@/components/site-header";
 import { getPublishedArticles, type PublicArticle } from "@/lib/public-articles";
+import { SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Blog",
   description: "Artigos e novidades da Kanglu.",
+  // Canônica da listagem — mesma base do sitemap/JSON-LD.
+  alternates: { canonical: `${SITE_URL}/blog` },
 };
 
 // Revalida no máximo a cada 60s. Sem isto, em produção a listagem seria

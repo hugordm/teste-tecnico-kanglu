@@ -92,6 +92,12 @@ No editor, um botão **"Gerar novamente"** (visível apenas para rascunhos) refa
 
 Ao gerar um artigo, **4 opções** de capa são criadas via Nano Banana 2 **em paralelo** (Promise.allSettled — não somam tempos) e hospedadas no Vercel Blob; a 1ª que der certo já vira a capa padrão, então o artigo nunca fica sem imagem. No editor, uma galeria exibe as opções: clicar em uma a marca como capa (reversível), e ao **salvar** a escolha vira definitiva — as demais são apagadas do Blob. O botão **"Gerar novamente"** produz outras 4 (apagando as anteriores do Blob). Se a geração falhar, o artigo não é afetado: fica sem imagem e o crédito do modelo é gravado quando há capa. Opcional por artigo.
 
+### Imagens no corpo do artigo
+
+Além da capa, o usuário pode inserir imagens **no meio do texto**, reusando o conjunto já gerado (capa + as 4 opções) — sem gerar/subir nada novo. Na seção de imagem do editor, cada imagem disponível tem **"Inserir no texto"**, que escreve um marcador `[[imagem:URL]]` na posição do cursor do conteúdo. Na renderização (`article-markdown`, compartilhado entre blog e prévia), o conteúdo é quebrado nos marcadores e cada um vira um `<figure>` com o mesmo estilo da capa — o marcador nunca chega ao parser do markdown, evitando colisão com _link references_ do CommonMark.
+
+A URL fica **embutida no texto** (não um índice), então o conteúdo é auto-contido e não precisa de campo novo no schema. Isso também protege a imagem da limpeza do Blob: nos dois pontos que apagam imagens (salvar e "gerar novamente"), uma URL que apareça no `content` **nunca** é apagada (`content.includes(url)`), mesmo não sendo a capa. Opcional — artigo sem marcador funciona como antes.
+
 ### Regras de conteúdo (aplicadas no prompt)
 
 O system prompt aplica, nos dois fluxos de IA: proibição de inventar dados, números ou pesquisas; proibição de citar concorrentes da Kanglu (filtro reforçado por lista de domínios na busca web); atribuição explícita de fontes; e preferência por descrição qualitativa em vez de estatísticas específicas de terceiros não presentes nas fontes. A limpeza determinística remove marcações de citação numeradas ([n]) que o modelo de busca eventualmente insere.

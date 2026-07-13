@@ -101,9 +101,18 @@ export async function PATCH(req: Request, { params }: Params) {
   // Fora da transação de propósito — é limpeza de lixo e nunca deve fazer o save
   // falhar (deleteArticleImages também não lança). Se o Blob estiver fora do ar,
   // o pior caso é uma imagem órfã, não um erro pro usuário.
+  //
+  // PROTEÇÃO (Etapa 3): além da capa (finalOg), preservamos qualquer opção que
+  // esteja referenciada NO CORPO do artigo — uma imagem inserida via marcador
+  // `[[imagem:URL]]` não é a capa mas NÃO pode ser apagada (quebraria o corpo).
+  // `content.includes(url)` é à prova de falso-positivo (URL de Blob é única) e
+  // protege qualquer forma de referência, não só o marcador.
   if (clearImageOptions) {
     const finalOg = "ogImage" in rest ? rest.ogImage : existing.ogImage;
-    const toDelete = existing.imageOptions.filter((u) => u !== finalOg);
+    const contentToScan = "content" in rest ? rest.content ?? "" : existing.content;
+    const toDelete = existing.imageOptions.filter(
+      (u) => u !== finalOg && !contentToScan.includes(u),
+    );
     await deleteArticleImages(toDelete);
   }
 
