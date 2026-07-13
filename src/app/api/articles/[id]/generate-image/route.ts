@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
-import { ImageAiError } from "@/lib/image";
-import { generateAndUploadArticleImage } from "@/lib/article-image";
+import {
+  generateAndUploadArticleImageOptions,
+  deleteArticleImages,
+} from "@/lib/article-image";
 
 // O upload pro Blob usa o SDK do Node (Buffer), então fixamos o runtime nodejs.
 export const runtime = "nodejs";
@@ -9,20 +11,19 @@ export const runtime = "nodejs";
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * POST /api/articles/[id]/generate-image  (protegido)
+ * POST /api/articles/[id]/generate-image  (protegido) — "Gerar novamente"
  *
- * Gera uma imagem ilustrativa via Nano Banana 2 Lite (OpenRouter), hospeda no
- * Vercel Blob (público) e salva a URL + o crédito do modelo no artigo. Pode ser
- * chamado de novo para SUBSTITUIR a imagem (gera outra e sobrescreve a URL).
+ * Gera 4 novas opções de capa via Nano Banana 2 Lite (OpenRouter) EM PARALELO,
+ * hospeda no Vercel Blob e as coloca em `imageOptions`; a 1ª que der certo vira
+ * a capa padrão (`ogImage`) + `imageCredit`. Antes de gerar, APAGA do Blob as
+ * imagens anteriores que serão substituídas (as opções pendentes + a capa atual,
+ * quando forem do nosso Blob) — evita acumular lixo.
  *
- * A URL vai em `ogImage` (serve de imagem no topo do artigo E de imagem
- * OpenGraph/JSON-LD) e o crédito em `imageCredit`.
- *
- * Contratos de falha — NENHUM deles corrompe o artigo (só damos update DEPOIS de
- * ter a imagem e a URL do Blob em mãos):
+ * Contratos de falha — NENHUM corrompe o artigo (só damos update DEPOIS de ter
+ * as URLs em mãos):
  *   - 401 se não autenticado.
  *   - 404 se o artigo não existe.
- *   - 502 se a geração da imagem OU o upload falharem (mensagem amigável).
+ *   - 502 se TODAS as gerações/uploads falharem (mensagem amigável).
  */
 export async function POST(req: Request, { params }: Params) {
   const auth = await getAuth(req);
@@ -39,29 +40,32 @@ export async function POST(req: Request, { params }: Params) {
   // Geração + upload são os pontos que podem falhar de verdade (APIs externas).
   // Isolados no try pra virar 502 amigável em vez de 500 cru — e, crucialmente,
   // o artigo só é tocado no update lá embaixo, depois de tudo dar certo.
-  let url: string;
+  let urls: string[];
   let credit: string;
   try {
-    ({ url, credit } = await generateAndUploadArticleImage(id, existing.title));
+    ({ urls, credit } = await generateAndUploadArticleImageOptions(
+      id,
+      existing.title,
+    ));
   } catch (err) {
-    if (err instanceof ImageAiError) {
-      console.warn(`[generate-image] geração falhou: ${err.message}`);
-    } else {
-      // Falha do upload (Blob) ou outro erro externo: log e 502 mesmo assim,
-      // sem derrubar o server nem mexer no artigo.
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[generate-image] upload/erro externo falhou: ${msg}`);
-    }
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[generate-image] geração de opções falhou: ${msg}`);
     return Response.json(
-      { error: "Não foi possível gerar a imagem agora. Tente novamente." },
+      { error: "Não foi possível gerar as imagens agora. Tente novamente." },
       { status: 502 },
     );
   }
 
-  // Só aqui tocamos o artigo: URL da imagem em ogImage + crédito do modelo.
+  // As novas opções deram certo → agora sim apagamos as anteriores do Blob (as
+  // opções pendentes + a capa que estava em uso, se for do nosso Blob). Feito
+  // DEPOIS de gerar as novas: se a geração falhasse, o artigo continuaria com as
+  // imagens antigas intactas. deleteArticleImages nunca lança.
+  await deleteArticleImages([...existing.imageOptions, existing.ogImage ?? ""]);
+
+  // Só aqui tocamos o artigo: novas opções + a 1ª como capa padrão.
   const article = await prisma.article.update({
     where: { id },
-    data: { ogImage: url, imageCredit: credit },
+    data: { ogImage: urls[0], imageCredit: credit, imageOptions: urls },
     include: { sources: true },
   });
 

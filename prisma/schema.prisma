@@ -32,6 +32,12 @@ model Article {
   imageCredit     String?
   imageSourceUrl  String?
 
+  // Opções de capa geradas por IA ainda PENDENTES de confirmação. Guarda as URLs
+  // (Vercel Blob) das 4 variações; a marcada vira `ogImage`. Enquanto houver itens
+  // aqui, a escolha não foi confirmada (sobrevive a reload). Ao salvar o artigo, a
+  // marcada é confirmada, as demais são apagadas do Blob e este campo esvazia.
+  imageOptions    String[]      @default([])
+
   // Rastreabilidade de IA (exigência de disclaimer do teste)
   aiAssisted      Boolean       @default(false)
   aiModel         String?

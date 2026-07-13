@@ -77,9 +77,12 @@ Geração por **busca automática na web**. Recebe apenas o tema; o Perplexity S
 **Respostas:** `201` (draft com fontes reais) · `422` se nenhuma fonte não-concorrente for encontrada · `400` · `401` · `502`.
 
 ### `POST /api/articles/[id]/generate-image`
-Gera uma ilustração de capa via Nano Banana 2, faz upload no Vercel Blob e salva a URL (campo de imagem OG) + o crédito do modelo no artigo.
+"Gerar novamente": gera **4 opções** de capa via Nano Banana 2 **em paralelo**, faz upload no Vercel Blob e as grava em `imageOptions`; a 1ª que der certo vira a capa padrão (campo de imagem OG) + crédito. Apaga do Blob as imagens anteriores (opções pendentes + capa em uso) que serão substituídas.
 
-**Respostas:** `200` (artigo com imagem) · `404` · `401` · `502` (falha, sem corromper o artigo).
+**Respostas:** `200` (artigo com novas opções) · `404` · `401` · `502` (todas falharam, sem corromper o artigo).
+
+### Escolha da capa (sem endpoint dedicado)
+A escolha entre as `imageOptions` é feita no editor (estado local, reversível) e **confirmada ao salvar** o artigo via `PATCH /api/articles/[id]`: a opção marcada (campo OG) vira definitiva, as demais são apagadas do Blob e `imageOptions` é esvaziado.
 
 ---
 

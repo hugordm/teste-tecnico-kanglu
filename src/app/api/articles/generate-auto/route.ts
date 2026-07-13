@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 import { generateUniqueSlug } from "@/lib/validation";
 import { generateDraftWithWebSearch, AiError } from "@/lib/ai";
-import { generateAndUploadArticleImage } from "@/lib/article-image";
+import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
 import { z } from "zod";
 
 // O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
@@ -118,17 +118,21 @@ export async function POST(req: Request) {
   });
 
   // Imagem automática: extra, NUNCA obrigatória. O artigo já está salvo acima;
-  // se a geração/upload da imagem falhar, engolimos o erro (warn) e devolvemos o
-  // artigo sem imagem — o usuário gera depois pelo botão manual. Try/catch
+  // se a geração/upload das imagens falhar, engolimos o erro (warn) e devolvemos
+  // o artigo sem imagem — o usuário gera depois pelo botão manual. Try/catch
   // próprio, isolado, pra que uma falha externa jamais derrube a criação.
+  //
+  // Gera 4 opções EM PARALELO: a 1ª que der certo vira a capa padrão (ogImage),
+  // e TODAS ficam em imageOptions pro editor escolher depois. Se só 2-3 derem
+  // certo, usamos as que deram (allSettled dentro do helper).
   try {
-    const { url, credit } = await generateAndUploadArticleImage(
+    const { urls, credit } = await generateAndUploadArticleImageOptions(
       article.id,
       article.title,
     );
     article = await prisma.article.update({
       where: { id: article.id },
-      data: { ogImage: url, imageCredit: credit },
+      data: { ogImage: urls[0], imageCredit: credit, imageOptions: urls },
       include: { sources: true },
     });
   } catch (err) {

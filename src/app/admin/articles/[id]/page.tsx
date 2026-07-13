@@ -244,10 +244,11 @@ export default function EditorPage() {
     }
   }
 
-  // Gerar imagem: cria uma ilustração via IA, hospeda no Blob e salva a URL no
-  // artigo (campo ogImage) + o crédito do modelo. Atualiza SÓ os campos de
-  // imagem no estado local — preserva edições de conteúdo ainda não salvas.
-  // Chamar de novo substitui a imagem. Não corrompe o artigo se falhar (502).
+  // Gerar (novamente) imagens: cria 4 opções de capa via IA, hospeda no Blob e
+  // atualiza imageOptions + a capa padrão (1ª). Atualiza SÓ os campos de imagem
+  // no estado local — preserva edições de conteúdo ainda não salvas. Chamar de
+  // novo substitui as opções (a rota apaga as anteriores do Blob). Não corrompe
+  // o artigo se tudo falhar (502).
   async function generateImage() {
     if (!article) return;
     setGeneratingImage(true);
@@ -262,11 +263,15 @@ export default function EditorPage() {
               ...prev,
               ogImage: data.article.ogImage,
               imageCredit: data.article.imageCredit,
+              imageOptions: data.article.imageOptions,
             }
           : prev,
       );
       set("ogImage", data.article.ogImage ?? "");
-      toast.success("Imagem gerada.");
+      const n = data.article.imageOptions.length;
+      toast.success(
+        n > 1 ? `${n} opções geradas.` : "Imagem gerada.",
+      );
     } catch (err) {
       toast.error(
         err instanceof ApiError ? err.message : "Não foi possível gerar a imagem.",
@@ -274,6 +279,13 @@ export default function EditorPage() {
     } finally {
       setGeneratingImage(false);
     }
+  }
+
+  // Marcar uma opção como capa (SÓ estado local, reversível). Não chama API nem
+  // apaga nada: só aponta o ogImage pra opção clicada. A escolha vira definitiva
+  // e as demais são descartadas do Blob apenas ao SALVAR (o PATCH confirma).
+  function selectOption(url: string) {
+    set("ogImage", url);
   }
 
   // --- Fontes ---
@@ -319,6 +331,8 @@ export default function EditorPage() {
   const busy =
     saving || publishing || deleting || regenerating || generatingImage;
   const hasImage = isHttpUrl(form.ogImage);
+  // Há opções pendentes de escolha? (galeria em vez de capa única)
+  const hasOptions = article.imageOptions.length > 0;
   // O campo de agendamento só faz sentido enquanto o artigo NÃO está visível no
   // blog: rascunho, em revisão, ou publicado porém ainda agendado p/ o futuro.
   // Publicado e já no ar (publishAt nulo ou no passado) esconde o campo — evita
@@ -483,34 +497,79 @@ export default function EditorPage() {
           {/* Imagem ilustrativa (IA) */}
           <Section title="Imagem ilustrativa">
             <p className="text-xs text-kanglu-bordo/50">
-              Gera uma imagem de topo via IA a partir do título. Aparece no topo
-              do artigo publicado, com crédito do modelo. Opcional.
+              Gera 4 opções de capa via IA a partir do título. Aparece no topo do
+              artigo publicado, com crédito do modelo. Opcional.
             </p>
-            {hasImage && (
-              <div className="mt-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={form.ogImage}
-                  alt={`Ilustração do artigo: ${form.title}`}
-                  className="w-full rounded-lg border border-kanglu-nude object-cover"
-                />
-                {article.imageCredit && (
-                  <p className="mt-2 text-xs text-kanglu-bordo/50">
-                    Crédito: {article.imageCredit}
-                  </p>
-                )}
-              </div>
+
+            {hasOptions ? (
+              // Galeria de escolha: clicar marca a opção como capa (reversível,
+              // só estado local). A marcada ganha destaque. Ao SALVAR o artigo, a
+              // escolha vira definitiva e as demais são descartadas do Blob.
+              <>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {article.imageOptions.map((url, i) => {
+                    const selected = url === form.ogImage;
+                    return (
+                      <button
+                        key={url}
+                        type="button"
+                        onClick={() => selectOption(url)}
+                        aria-pressed={selected}
+                        className={`group relative overflow-hidden rounded-lg border-2 transition-colors ${
+                          selected
+                            ? "border-kanglu-orange ring-2 ring-kanglu-orange/30"
+                            : "border-kanglu-nude hover:border-kanglu-orange/50"
+                        }`}
+                        title={selected ? "Capa selecionada" : "Usar esta como capa"}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={`Opção de capa ${i + 1}`}
+                          className="aspect-video w-full object-cover"
+                        />
+                        {selected && (
+                          <span className="absolute left-2 top-2 rounded-full bg-kanglu-orange px-2 py-0.5 text-xs font-semibold text-white shadow">
+                            ✓ Selecionada
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-kanglu-bordo/50">
+                  Clique para escolher a capa. Ao <strong>salvar</strong>, a
+                  selecionada vira definitiva e as demais são descartadas.
+                </p>
+              </>
+            ) : (
+              hasImage && (
+                <div className="mt-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={form.ogImage}
+                    alt={`Ilustração do artigo: ${form.title}`}
+                    className="w-full rounded-lg border border-kanglu-nude object-cover"
+                  />
+                  {article.imageCredit && (
+                    <p className="mt-2 text-xs text-kanglu-bordo/50">
+                      Crédito: {article.imageCredit}
+                    </p>
+                  )}
+                </div>
+              )
             )}
+
             <button
               type="button"
               onClick={generateImage}
               disabled={busy}
               className="mt-3 rounded-lg border border-kanglu-orange px-4 py-2 text-sm font-semibold text-kanglu-orange transition-colors hover:bg-kanglu-orange/10 disabled:opacity-60"
-              title="Gera uma ilustração por IA e a hospeda para uso no artigo"
+              title="Gera 4 novas opções de capa por IA e as hospeda para escolha"
             >
               {generatingImage
-                ? "Gerando imagem…"
-                : hasImage
+                ? "Gerando imagens…"
+                : hasOptions || hasImage
                   ? "Gerar novamente"
                   : "Gerar imagem"}
             </button>

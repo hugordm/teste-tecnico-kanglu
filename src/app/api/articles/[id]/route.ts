@@ -1,7 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 import { updateArticleInput, slugify } from "@/lib/validation";
+import { deleteArticleImages } from "@/lib/article-image";
 import { z } from "zod";
+
+// O passo de confirmar a escolha de capa apaga imagens do Vercel Blob (SDK do
+// Node), então fixamos o runtime nodejs.
+export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -67,10 +72,21 @@ export async function PATCH(req: Request, { params }: Params) {
     slug = await generateUniqueSlug(title, id);
   }
 
+  // Confirmação da escolha de capa: salvar é o momento em que a opção marcada
+  // (`ogImage`) vira DEFINITIVA. Se o artigo ainda tinha opções pendentes
+  // (`imageOptions` não vazio), aqui a gente confirma — as demais opções somem
+  // do Blob e `imageOptions` esvazia. `finalOg` é a URL que fica: a enviada no
+  // payload (a marcada) ou, se o cliente não mandou o campo, a capa atual.
+  // `imageOptions` NÃO é editável pelo cliente (fora do updateArticleInput):
+  // quem o zera é só este passo, de forma controlada.
+  const clearImageOptions = existing.imageOptions.length > 0;
+  const imageOptionsData = clearImageOptions ? { imageOptions: [] } : {};
+
   const article = await prisma.article.update({
     where: { id },
     data: {
       ...rest,
+      ...imageOptionsData,
       ...(title !== undefined ? { title } : {}),
       ...(slug !== undefined ? { slug } : {}),
       // Fontes enviadas SUBSTITUEM as existentes (troca atômica).
@@ -80,6 +96,16 @@ export async function PATCH(req: Request, { params }: Params) {
     },
     include: { sources: true },
   });
+
+  // Limpeza do Blob depois do commit no banco: apaga as opções não escolhidas.
+  // Fora da transação de propósito — é limpeza de lixo e nunca deve fazer o save
+  // falhar (deleteArticleImages também não lança). Se o Blob estiver fora do ar,
+  // o pior caso é uma imagem órfã, não um erro pro usuário.
+  if (clearImageOptions) {
+    const finalOg = "ogImage" in rest ? rest.ogImage : existing.ogImage;
+    const toDelete = existing.imageOptions.filter((u) => u !== finalOg);
+    await deleteArticleImages(toDelete);
+  }
 
   return Response.json({ article });
 }

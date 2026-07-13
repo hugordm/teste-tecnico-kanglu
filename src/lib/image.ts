@@ -50,16 +50,23 @@ export interface GeneratedImage {
  * Monta o prompt da imagem a partir do título do artigo. Estilo editorial,
  * moderno e limpo, SEM texto na imagem (modelos de imagem tendem a "escrever"
  * coisas erradas), com a paleta da marca Kanglu.
+ *
+ * `variantHint` (opcional) injeta uma direção de estilo/composição diferente por
+ * variação — usado quando geramos 4 opções em paralelo, pra que saiam distintas
+ * em vez de 4 quase-iguais.
  */
-function buildImagePrompt(title: string): string {
+function buildImagePrompt(title: string, variantHint?: string): string {
   return [
     `Ilustração editorial profissional para o topo de um artigo de blog sobre: "${title}".`,
     "Contexto: blog de e-commerce e logística (rastreamento de pedidos, entregas, pós-compra).",
     "Estilo: moderno, limpo, minimalista, vetorial/flat com profundidade sutil, luz suave.",
     "Paleta condizente com a marca: tons de bordô, laranja e creme.",
     "Composição horizontal (banner), boa como imagem de capa.",
+    variantHint ? `Direção específica desta versão: ${variantHint}.` : "",
     "IMPORTANTE: NÃO inclua nenhum texto, letras, números, logos ou marcas d'água na imagem.",
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /**
@@ -69,6 +76,7 @@ function buildImagePrompt(title: string): string {
  */
 export async function generateArticleImage(
   title: string,
+  variantHint?: string,
 ): Promise<GeneratedImage> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -90,7 +98,9 @@ export async function generateArticleImage(
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: buildImagePrompt(title) }],
+        messages: [
+          { role: "user", content: buildImagePrompt(title, variantHint) },
+        ],
         // Habilita a saída de imagem: o modelo devolve a imagem em
         // choices[0].message.images[] como data URL base64.
         modalities: ["image", "text"],

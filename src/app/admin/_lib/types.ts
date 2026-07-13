@@ -28,6 +28,7 @@ export type AdminArticle = {
   ogImage: string | null;
   imageCredit: string | null;
   imageSourceUrl: string | null;
+  imageOptions: string[]; // opções de capa pendentes de escolha (vazio = já escolhida)
   aiAssisted: boolean;
   aiModel: string | null;
   publishedAt: string | null;

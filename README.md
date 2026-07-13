@@ -90,7 +90,7 @@ No editor, um botão **"Gerar novamente"** (visível apenas para rascunhos) refa
 
 ### Geração de imagem por IA
 
-No editor, o botão **"Gerar imagem"** cria uma ilustração de capa via Nano Banana 2, hospeda no Vercel Blob e a exibe no topo do artigo no blog, com o crédito do modelo. Opcional por artigo.
+Ao gerar um artigo, **4 opções** de capa são criadas via Nano Banana 2 **em paralelo** (Promise.allSettled — não somam tempos) e hospedadas no Vercel Blob; a 1ª que der certo já vira a capa padrão, então o artigo nunca fica sem imagem. No editor, uma galeria exibe as opções: clicar em uma a marca como capa (reversível), e ao **salvar** a escolha vira definitiva — as demais são apagadas do Blob. O botão **"Gerar novamente"** produz outras 4 (apagando as anteriores do Blob). Se a geração falhar, o artigo não é afetado: fica sem imagem e o crédito do modelo é gravado quando há capa. Opcional por artigo.
 
 ### Regras de conteúdo (aplicadas no prompt)
 
@@ -153,7 +153,7 @@ src/
         [id]/route.ts                # GET / PATCH / DELETE
         [id]/publish/route.ts        # portão de publicação (422)
         [id]/regenerate/route.ts     # gerar novamente (das mesmas fontes)
-        [id]/generate-image/route.ts # gera imagem → Vercel Blob
+        [id]/generate-image/route.ts # gera 4 opções de capa → Vercel Blob
         generate/route.ts            # geração com URLs (Gemini)
         generate-auto/route.ts       # busca automática por tema (Sonar)
     admin/                           # login, painel, editor, geradores
