@@ -3,6 +3,7 @@ import { getAuth } from "@/lib/auth";
 import { generateUniqueSlug } from "@/lib/validation";
 import { generateDraftWithWebSearch, AiError } from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
+import { validateModelId } from "@/lib/models";
 import { z } from "zod";
 
 // O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
@@ -17,6 +18,9 @@ export const runtime = "nodejs";
 const generateAutoInput = z.object({
   theme: z.string().trim().min(1, "Tema é obrigatório"),
   keywords: z.array(z.string().trim().min(1)).optional(),
+  // Modelos escolhidos (opcionais), VALIDADOS contra a lista curada.
+  textModel: z.string().optional(),
+  imageModel: z.string().optional(),
 });
 
 /**
@@ -54,11 +58,16 @@ export async function POST(req: Request) {
 
   const { theme, keywords } = parsed.data;
 
+  // Valida os modelos escolhidos contra a lista curada (allowlist); inválido/
+  // ausente vira undefined → cai no default (Sonar p/ texto, env p/ imagem).
+  const textModel = await validateModelId(parsed.data.textModel, "text");
+  const imageModel = await validateModelId(parsed.data.imageModel, "image");
+
   // Busca + geração num só passo. Isolada no try pra virar 502 amigável em vez
   // de 500 cru se a API externa falhar.
   let result;
   try {
-    result = await generateDraftWithWebSearch({ theme, keywords });
+    result = await generateDraftWithWebSearch({ theme, keywords, model: textModel });
   } catch (err) {
     if (err instanceof AiError) {
       console.warn(`[generate-auto] geração falhou: ${err.message}`);
@@ -129,6 +138,8 @@ export async function POST(req: Request) {
     const { urls, credit } = await generateAndUploadArticleImageOptions(
       article.id,
       article.title,
+      4,
+      imageModel,
     );
     article = await prisma.article.update({
       where: { id: article.id },

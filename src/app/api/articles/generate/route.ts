@@ -4,6 +4,7 @@ import { generateUniqueSlug } from "@/lib/validation";
 import { extractMany } from "@/lib/extract";
 import { generateDraft, AiError } from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
+import { validateModelId } from "@/lib/models";
 import { z } from "zod";
 
 // O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
@@ -19,6 +20,10 @@ const generateInput = z.object({
   theme: z.string().trim().min(1, "Tema é obrigatório"),
   keywords: z.array(z.string().trim().min(1)).optional(),
   urls: z.array(z.url("URL de fonte inválida")).optional(),
+  // Modelos escolhidos nos seletores (opcionais). São VALIDADOS contra a lista
+  // curada antes de usar — string arbitrária é descartada e cai no default.
+  textModel: z.string().optional(),
+  imageModel: z.string().optional(),
 });
 
 /**
@@ -53,6 +58,11 @@ export async function POST(req: Request) {
 
   const { theme, keywords, urls } = parsed.data;
 
+  // Valida os modelos escolhidos contra a lista curada (allowlist). Inválido/
+  // ausente vira undefined → a lib cai no default do env.
+  const textModel = await validateModelId(parsed.data.textModel, "text");
+  const imageModel = await validateModelId(parsed.data.imageModel, "image");
+
   // Extração é resiliente: URLs podres são ignoradas, não quebram o fluxo.
   const sources = await extractMany(urls ?? []);
 
@@ -60,7 +70,7 @@ export async function POST(req: Request) {
   // pra virar 502 amigável em vez de 500 cru.
   let result;
   try {
-    result = await generateDraft({ theme, keywords, sources });
+    result = await generateDraft({ theme, keywords, sources, model: textModel });
   } catch (err) {
     if (err instanceof AiError) {
       console.warn(`[generate] geração falhou: ${err.message}`);
@@ -117,6 +127,8 @@ export async function POST(req: Request) {
     const { urls, credit } = await generateAndUploadArticleImageOptions(
       article.id,
       article.title,
+      4,
+      imageModel,
     );
     article = await prisma.article.update({
       where: { id: article.id },

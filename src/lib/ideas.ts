@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { parseJsonLoose } from "@/lib/json-extract";
 
 // ---------------------------------------------------------------------------
 // Sugestão de pautas — a IA propõe TÍTULOS de artigos no nicho da Kanglu.
@@ -197,14 +198,10 @@ function extractMessageContent(json: unknown): string | null {
  * devolve `[]` no pior caso e o chamador trata.
  */
 function parseIdeas(raw: string, count: number): string[] {
-  const cleaned = stripCodeFences(raw);
-
-  let obj: unknown;
-  try {
-    obj = JSON.parse(cleaned);
-  } catch {
-    return [];
-  }
+  // Mesma extração robusta do gerador (cercas + texto antes/depois): modelos
+  // diferentes formatam o JSON de jeitos diferentes.
+  const obj = parseJsonLoose(raw);
+  if (obj === null) return [];
 
   // Aceita array cru ou o objeto {titles:[...]}.
   let list: unknown;
@@ -241,15 +238,4 @@ function cleanTitle(raw: string): string {
     .replace(/^["“']+|["”']+$/g, "") // aspas nas pontas
     .replace(/\s+/g, " ")
     .trim();
-}
-
-/**
- * Remove cercas de código markdown que modelos teimam em adicionar mesmo
- * pedindo JSON puro (```json ... ``` ou ``` ... ```).
- */
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) return fenced[1].trim();
-  return trimmed;
 }

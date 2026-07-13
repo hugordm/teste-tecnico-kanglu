@@ -2,6 +2,7 @@ import { z } from "zod";
 import { slugify } from "@/lib/validation";
 import type { ExtractedSource } from "@/lib/extract";
 import { resolveWebSources, type ResolvedSource } from "@/lib/web-sources";
+import { parseJsonLoose } from "@/lib/json-extract";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -57,6 +58,8 @@ export interface GenerateDraftParams {
   theme: string;
   keywords?: string[];
   sources: ExtractedSource[];
+  /** Modelo escolhido no seletor; sem ele, usa OPENROUTER_MODEL/default. */
+  model?: string;
 }
 
 export interface GenerateDraftResult {
@@ -155,7 +158,7 @@ export async function generateDraft(
   if (!apiKey) {
     throw new AiError("OPENROUTER_API_KEY não configurada");
   }
-  const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+  const model = params.model || process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
 
   const raw = await callOpenRouter(apiKey, model, params);
   const parsed = safeParseDraft(raw);
@@ -195,6 +198,8 @@ export interface RawAnnotation {
 export interface GenerateWithWebParams {
   theme: string;
   keywords?: string[];
+  /** Modelo escolhido; sem ele, usa WEB_SEARCH_MODEL (Sonar). */
+  model?: string;
 }
 
 export interface GenerateWithWebResult {
@@ -222,7 +227,14 @@ export async function generateDraftWithWebSearch(
   if (!apiKey) {
     throw new AiError("OPENROUTER_API_KEY não configurada");
   }
-  const model = WEB_SEARCH_MODEL;
+  const model = params.model || WEB_SEARCH_MODEL;
+
+  // O Sonar (perplexity/*) busca a web nativamente e devolve as fontes em
+  // `annotations` sem precisar de plugin. Qualquer OUTRO modelo escolhido precisa
+  // do plugin `web` da OpenRouter pra buscar e devolver as `annotations` no mesmo
+  // formato — assim o seletor de modelo funciona no generate-auto sem perder as
+  // fontes. Ver isNativeWebSearchModel em lib/models.
+  const useWebPlugin = !model.startsWith("perplexity/");
 
   // Guardamos o último resultado para, se todas as tentativas voltarem sem
   // fontes válidas, ainda devolver um rascunho válido com sources:[] — a rota
@@ -234,6 +246,7 @@ export async function generateDraftWithWebSearch(
       apiKey,
       model,
       params,
+      useWebPlugin,
     );
     const parsed = safeParseDraft(content);
     parsed.suggestedSlug =
@@ -286,6 +299,7 @@ async function callOpenRouterWeb(
   apiKey: string,
   model: string,
   params: GenerateWithWebParams,
+  useWebPlugin: boolean,
 ): Promise<{ content: string; annotations: RawAnnotation[] }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
@@ -305,12 +319,15 @@ async function callOpenRouterWeb(
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: buildWebUserPrompt(params) },
         ],
-        // O modelo de busca (Sonar) pesquisa a web nativamente e devolve as
-        // fontes usadas em message.annotations (url_citation) — não precisa do
-        // plugin `web` da OpenRouter.
-        //
+        // Fonte da busca web:
+        //  - Sonar (perplexity/*) pesquisa nativamente e devolve as fontes em
+        //    message.annotations (url_citation) — sem plugin.
+        //  - Qualquer outro modelo escolhido recebe o plugin `web` da OpenRouter,
+        //    que busca e injeta as mesmas `annotations`. Assim o seletor funciona
+        //    aqui sem quebrar o fluxo de fontes.
+        ...(useWebPlugin ? { plugins: [{ id: "web" }] } : {}),
         // Sem `response_format`: o Sonar NÃO aceita `{ type: "json_object" }`
-        // (só `json_schema`/`text`). Como ele já devolve o JSON pedido pelo
+        // (só `json_schema`/`text`). Como o modelo já devolve o JSON pedido pelo
         // SYSTEM_PROMPT e o `safeParseDraft` limpa cercas + valida o shape, não
         // precisamos forçar o formato aqui.
         temperature: 0.4,
@@ -447,16 +464,13 @@ function extractMessageContent(json: unknown): string | null {
 }
 
 /**
- * Limpa cercas ```json, faz JSON.parse dentro de try e valida o shape. Nada
- * aqui confia no modelo — qualquer desvio vira AiError tratável.
+ * Extrai o JSON da resposta (tolerando cercas de código e texto antes/depois,
+ * via `parseJsonLoose`) e valida o shape. Nada aqui confia no modelo — falha ao
+ * conseguir o JSON ou desvio de shape vira AiError tratável.
  */
 function safeParseDraft(raw: string): GeneratedDraft {
-  const cleaned = stripCodeFences(raw);
-
-  let obj: unknown;
-  try {
-    obj = JSON.parse(cleaned);
-  } catch {
+  const obj = parseJsonLoose(raw);
+  if (obj === null) {
     throw new AiError("O modelo não devolveu um JSON válido");
   }
 
@@ -473,28 +487,23 @@ function safeParseDraft(raw: string): GeneratedDraft {
 }
 
 /**
- * Remove marcações de citação numeradas ([1], [2][3], …) que o modelo de busca
- * teima em deixar no corpo do texto. Cobre grupos consecutivos como [1][2] numa
- * varredura só. É rede de segurança: a instrução no prompt vem primeiro.
+ * Remove as marcações de citação que os modelos teimam em deixar no corpo, sem
+ * tocar no texto legítimo. Rede de segurança: a instrução no prompt vem primeiro,
+ * mas cada modelo cita de um jeito e o seletor permite trocar o modelo.
  *
- * O Sonar costuma escrever "texto [1]." — só apagar o [1] deixaria um espaço
- * órfão antes do ponto ("texto ."). Por isso engolimos o espaço inline que
- * antecede o marcador e, por garantia, normalizamos qualquer espaço restante
- * grudado numa pontuação.
+ * Cobre duas formas:
+ *  - Tags `<cite ...>...</cite>` (ex.: Claude via plugin web) — removemos só as
+ *    TAGS (abertura com ou sem atributos + fechamento), PRESERVANDO o conteúdo
+ *    interno: "<cite ...>a função do estoque</cite>" → "a função do estoque".
+ *  - Marcações numeradas [1], [2][3], … (ex.: Sonar). O Sonar costuma escrever
+ *    "texto [1].", então engolimos o espaço inline antes do marcador.
+ *
+ * Ao final, normaliza qualquer espaço órfão que tenha restado grudado numa
+ * pontuação (ex.: "texto ." → "texto.").
  */
 function stripCitationMarkers(content: string): string {
   return content
+    .replace(/<\/?cite(?=[\s/>])[^>]*>/gi, "")
     .replace(/[ \t]*\[\d+\](?:\[\d+\])*/g, "")
     .replace(/[ \t]+([.,;:!?])/g, "$1");
-}
-
-/**
- * Remove cercas de código markdown que modelos teimam em adicionar mesmo
- * pedindo JSON puro (```json ... ``` ou ``` ... ```).
- */
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fenced) return fenced[1].trim();
-  return trimmed;
 }

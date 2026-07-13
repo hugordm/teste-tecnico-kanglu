@@ -67,6 +67,7 @@ export async function generateAndUploadArticleImageOptions(
   articleId: string,
   title: string,
   count = 4,
+  imageModel?: string,
 ): Promise<UploadedArticleImageOptions> {
   const hints = Array.from(
     { length: count },
@@ -75,7 +76,7 @@ export async function generateAndUploadArticleImageOptions(
 
   const settled = await Promise.allSettled(
     hints.map(async (hint, i) => {
-      const image = await generateArticleImage(title, hint);
+      const image = await generateArticleImage(title, hint, imageModel);
       // Sufixo `-i` além do timestamp: as 4 sobem "ao mesmo tempo", então o
       // Date.now() pode coincidir entre elas — o índice garante chaves únicas.
       const blob = await put(

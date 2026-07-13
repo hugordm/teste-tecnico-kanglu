@@ -77,12 +77,14 @@ function buildImagePrompt(title: string, variantHint?: string): string {
 export async function generateArticleImage(
   title: string,
   variantHint?: string,
+  modelId?: string,
 ): Promise<GeneratedImage> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     throw new ImageAiError("OPENROUTER_API_KEY não configurada");
   }
-  const model = process.env.OPENROUTER_IMAGE_MODEL || DEFAULT_IMAGE_MODEL;
+  // Modelo escolhido no seletor; sem ele, usa OPENROUTER_IMAGE_MODEL/default.
+  const model = modelId || process.env.OPENROUTER_IMAGE_MODEL || DEFAULT_IMAGE_MODEL;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), IMAGE_TIMEOUT_MS);

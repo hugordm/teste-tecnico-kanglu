@@ -4,6 +4,7 @@ import {
   generateAndUploadArticleImageOptions,
   deleteArticleImages,
 } from "@/lib/article-image";
+import { validateModelId } from "@/lib/models";
 
 // O upload pro Blob usa o SDK do Node (Buffer), então fixamos o runtime nodejs.
 export const runtime = "nodejs";
@@ -37,6 +38,17 @@ export async function POST(req: Request, { params }: Params) {
     return Response.json({ error: "Artigo não encontrado" }, { status: 404 });
   }
 
+  // Modelo de imagem escolhido no seletor (opcional). O body pode vir vazio —
+  // "Gerar novamente" sem escolha usa o default. Validado contra a lista curada.
+  let imageModel: string | undefined;
+  try {
+    const body = (await req.json()) as { imageModel?: unknown };
+    const raw = typeof body?.imageModel === "string" ? body.imageModel : undefined;
+    imageModel = await validateModelId(raw, "image");
+  } catch {
+    // sem body / JSON inválido → cai no default do env
+  }
+
   // Geração + upload são os pontos que podem falhar de verdade (APIs externas).
   // Isolados no try pra virar 502 amigável em vez de 500 cru — e, crucialmente,
   // o artigo só é tocado no update lá embaixo, depois de tudo dar certo.
@@ -46,6 +58,8 @@ export async function POST(req: Request, { params }: Params) {
     ({ urls, credit } = await generateAndUploadArticleImageOptions(
       id,
       existing.title,
+      4,
+      imageModel,
     ));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

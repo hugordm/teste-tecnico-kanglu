@@ -9,6 +9,11 @@ import {
   LoadingMessages,
   GENERATE_URLS_MESSAGES,
 } from "../_components/loading-messages";
+import {
+  useCuratedModels,
+  ModelSelect,
+  ModelSelectSkeleton,
+} from "../_components/model-select";
 import type { AdminArticle } from "../_lib/types";
 
 // Geração por IA. A chamada pode DEMORAR (extrai URLs + chama o modelo), então
@@ -24,6 +29,18 @@ export default function GeneratePage() {
   const [urls, setUrls] = useState<string[]>([""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Seletores de modelo (texto + imagem). A lista curada vem de /api/models; ao
+  // carregar, pré-seleciona os defaults do env. Se falhar, o bloco some e a
+  // geração segue no default do servidor.
+  const { models, loading: modelsLoading } = useCuratedModels();
+  // null = usuário ainda não escolheu → o valor efetivo cai no default do env
+  // quando os modelos carregam. Derivar (em vez de sincronizar por effect) evita
+  // setState-em-effect e mantém a escolha do usuário quando ele troca.
+  const [textModel, setTextModel] = useState<string | null>(null);
+  const [imageModel, setImageModel] = useState<string | null>(null);
+  const effTextModel = textModel ?? models?.defaults.text ?? "";
+  const effImageModel = imageModel ?? models?.defaults.image ?? "";
 
   function updateUrl(index: number, value: string) {
     setUrls((prev) => prev.map((u, i) => (i === index ? value : u)));
@@ -57,6 +74,8 @@ export default function GeneratePage() {
             theme: theme.trim(),
             ...(cleanKeywords.length ? { keywords: cleanKeywords } : {}),
             ...(cleanUrls.length ? { urls: cleanUrls } : {}),
+            ...(effTextModel ? { textModel: effTextModel } : {}),
+            ...(effImageModel ? { imageModel: effImageModel } : {}),
           },
         },
       );
@@ -163,6 +182,33 @@ export default function GeneratePage() {
               + Adicionar URL
             </button>
           </div>
+
+          {/* Seletores de modelo (texto + imagem). Empilham no mobile, lado a
+              lado no sm+. Se a lista falhar (models null), somem e a geração usa
+              o modelo padrão do servidor. */}
+          {modelsLoading ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModelSelectSkeleton label="Modelo de texto" />
+              <ModelSelectSkeleton label="Modelo de imagem" />
+            </div>
+          ) : models ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModelSelect
+                label="Modelo de texto"
+                models={models.text}
+                value={effTextModel}
+                onChange={setTextModel}
+                disabled={loading}
+              />
+              <ModelSelect
+                label="Modelo de imagem"
+                models={models.image}
+                value={effImageModel}
+                onChange={setImageModel}
+                disabled={loading}
+              />
+            </div>
+          ) : null}
 
           {error && (
             <p

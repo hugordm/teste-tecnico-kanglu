@@ -9,6 +9,11 @@ import {
   LoadingMessages,
   GENERATE_AUTO_MESSAGES,
 } from "../_components/loading-messages";
+import {
+  useCuratedModels,
+  ModelSelect,
+  ModelSelectSkeleton,
+} from "../_components/model-select";
 import type { AdminArticle } from "../_lib/types";
 
 // Geração por TEMA com busca web automática. Diferente de /admin/generate: não
@@ -40,6 +45,16 @@ function GenerateAutoForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Seletores de modelo. O default de TEXTO aqui é o de busca web (Sonar); se o
+  // usuário trocar, o servidor anexa o plugin `web` pra manter as fontes.
+  const { models, loading: modelsLoading } = useCuratedModels();
+  // null = ainda não escolheu → cai no default (textWeb=Sonar / image do env).
+  // Derivar evita setState-em-effect e preserva a escolha do usuário.
+  const [textModel, setTextModel] = useState<string | null>(null);
+  const [imageModel, setImageModel] = useState<string | null>(null);
+  const effTextModel = textModel ?? models?.defaults.textWeb ?? "";
+  const effImageModel = imageModel ?? models?.defaults.image ?? "";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!theme.trim()) return;
@@ -59,6 +74,8 @@ function GenerateAutoForm() {
           body: {
             theme: theme.trim(),
             ...(cleanKeywords.length ? { keywords: cleanKeywords } : {}),
+            ...(effTextModel ? { textModel: effTextModel } : {}),
+            ...(effImageModel ? { imageModel: effImageModel } : {}),
           },
         },
       );
@@ -134,6 +151,32 @@ function GenerateAutoForm() {
             só forem encontradas fontes de concorrentes, nada é gerado — use a
             geração manual com URLs.
           </p>
+
+          {/* Seletores de modelo (texto + imagem). Empilham no mobile. Se a lista
+              falhar, somem e a geração usa o padrão do servidor (Sonar). */}
+          {modelsLoading ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModelSelectSkeleton label="Modelo de texto" />
+              <ModelSelectSkeleton label="Modelo de imagem" />
+            </div>
+          ) : models ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModelSelect
+                label="Modelo de texto"
+                models={models.text}
+                value={effTextModel}
+                onChange={setTextModel}
+                disabled={loading}
+              />
+              <ModelSelect
+                label="Modelo de imagem"
+                models={models.image}
+                value={effImageModel}
+                onChange={setImageModel}
+                disabled={loading}
+              />
+            </div>
+          ) : null}
 
           {error && (
             <p
