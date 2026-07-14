@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 import { generateUniqueSlug } from "@/lib/validation";
-import { generateDraftWithWebSearch, AiError } from "@/lib/ai";
+import {
+  generateDraftWithWebSearch,
+  generateDraftWithFirecrawl,
+  AiError,
+} from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
 import { validateModelId, isNativeWebSearchModel } from "@/lib/models";
 import { normalizeCategory } from "@/lib/categories";
@@ -22,6 +26,10 @@ const generateAutoInput = z.object({
   // Modelos escolhidos (opcionais), VALIDADOS contra a lista curada.
   textModel: z.string().optional(),
   imageModel: z.string().optional(),
+  // Motor de busca web: Firecrawl (padrão) busca e o modelo escreve; Sonar busca
+  // e escreve nativamente (fluxo original). Valor inválido/ausente cai no padrão
+  // (Firecrawl) — mesma filosofia leniente do seletor de modelo.
+  searchEngine: z.enum(["firecrawl", "sonar"]).default("firecrawl").catch("firecrawl"),
 });
 
 /**
@@ -57,21 +65,43 @@ export async function POST(req: Request) {
     );
   }
 
-  const { theme, keywords } = parsed.data;
+  const { theme, keywords, searchEngine } = parsed.data;
 
   // Valida os modelos escolhidos contra a lista curada (allowlist); inválido/
-  // ausente vira undefined → cai no default (Sonar p/ texto, env p/ imagem).
-  // Texto valida contra a lista de BUSCA (textWeb: só robustos + Sonar) — um
-  // lite forçado no payload é rejeitado aqui e cai no Sonar. Imagem é a lista
-  // completa (não depende de busca).
-  const textModel = await validateModelId(parsed.data.textModel, "textWeb");
+  // ausente vira undefined → cai no default do env. O texto valida POR MOTOR:
+  //   - Firecrawl: lista COMPLETA (o modelo só escreve; a busca é do Firecrawl) —
+  //     qualquer modelo, inclusive lite.
+  //   - Sonar: lista ROBUSTA (textWeb, sem lite) — um lite escolhido à mão é
+  //     rejeitado aqui e cai no default robusto (Sonar), evitando o 422 do plugin.
+  // Camada de segurança dupla: mesmo que a UI mostre um lite, o servidor barra.
+  const textKind = searchEngine === "sonar" ? "textWeb" : "text";
+  const textModel = await validateModelId(parsed.data.textModel, textKind);
   const imageModel = await validateModelId(parsed.data.imageModel, "image");
 
-  // Busca + geração num só passo. Isolada no try pra virar 502 amigável em vez
-  // de 500 cru se a API externa falhar.
+  // Busca + geração. Isolada no try pra virar 502 amigável em vez de 500 cru se
+  // a API externa falhar. Dois motores de busca:
+  //   - "sonar": fluxo ORIGINAL, intocado — o Sonar busca e escreve nativamente.
+  //   - "firecrawl" (padrão): o Firecrawl busca e o modelo do seletor escreve. Se
+  //     o Firecrawl falhar (erro/limite/timeout) OU não sobrar fonte
+  //     não-concorrente, cai AUTOMATICAMENTE no Sonar (fallback) — a busca nunca
+  //     simplesmente quebra. Só se o Sonar TAMBÉM falhar vira 502.
   let result;
   try {
-    result = await generateDraftWithWebSearch({ theme, keywords, model: textModel });
+    if (searchEngine === "sonar") {
+      result = await generateDraftWithWebSearch({ theme, keywords, model: textModel });
+    } else {
+      try {
+        result = await generateDraftWithFirecrawl({ theme, keywords, model: textModel });
+      } catch (fcErr) {
+        const msg = fcErr instanceof Error ? fcErr.message : String(fcErr);
+        console.warn(
+          `[generate-auto] Firecrawl indisponível, caindo no Sonar: ${msg}`,
+        );
+        // Fallback SEMPRE no Sonar (env WEB_SEARCH_MODEL), sem passar o modelo
+        // escritor: ele pode ser um "lite" que não busca bem. O Sonar é a rede.
+        result = await generateDraftWithWebSearch({ theme, keywords });
+      }
+    }
   } catch (err) {
     if (err instanceof AiError) {
       console.warn(`[generate-auto] geração falhou: ${err.message}`);

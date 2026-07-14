@@ -13,6 +13,8 @@ import {
   useCuratedModels,
   ModelSelect,
   ModelSelectSkeleton,
+  EngineSelect,
+  type SearchEngine,
 } from "../_components/model-select";
 import type { AdminArticle } from "../_lib/types";
 
@@ -45,15 +47,36 @@ function GenerateAutoForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Seletores de modelo. O default de TEXTO aqui é o de busca web (Sonar); se o
-  // usuário trocar, o servidor anexa o plugin `web` pra manter as fontes.
   const { models, loading: modelsLoading } = useCuratedModels();
-  // null = ainda não escolheu → cai no default (textWeb=Sonar / image do env).
-  // Derivar evita setState-em-effect e preserva a escolha do usuário.
+  // null = ainda não escolheu → cai no default do motor. Derivar evita
+  // setState-em-effect e preserva a escolha do usuário.
   const [textModel, setTextModel] = useState<string | null>(null);
   const [imageModel, setImageModel] = useState<string | null>(null);
-  const effTextModel = textModel ?? models?.defaults.textWeb ?? "";
+
+  // Motor de busca: Firecrawl (padrão) busca e o modelo escreve; Sonar busca e
+  // escreve nativamente (é também o fallback). A escolha é validada no servidor.
+  const [engine, setEngine] = useState<SearchEngine>("firecrawl");
+
+  // O seletor de MODELO DE TEXTO se adapta ao MOTOR: Firecrawl mostra a lista
+  // COMPLETA (inclui lite — o modelo só escreve); Sonar mostra a lista ROBUSTA
+  // (sem lite — o modelo não-Sonar precisa acionar o plugin web). Default idem.
+  const textList = engine === "sonar" ? models?.textWeb : models?.text;
+  const textDefault =
+    engine === "sonar" ? models?.defaults.textWeb : models?.defaults.text;
+  const effTextModel = textModel ?? textDefault ?? "";
   const effImageModel = imageModel ?? models?.defaults.image ?? "";
+
+  // Ao trocar de motor, se o modelo ESCOLHIDO à mão não existir na lista do novo
+  // motor (ex.: um lite selecionado e o motor virou Sonar), reseta pro default
+  // robusto (setTextModel(null)) — assim não fica um lite selecionado no Sonar.
+  // Trocar pra Firecrawl nunca precisa resetar (a lista é superconjunto).
+  function handleEngineChange(next: SearchEngine) {
+    setEngine(next);
+    if (next === "sonar" && textModel && models) {
+      const robust = models.textWeb;
+      if (!robust.some((m) => m.id === textModel)) setTextModel(null);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -74,6 +97,7 @@ function GenerateAutoForm() {
           body: {
             theme: theme.trim(),
             ...(cleanKeywords.length ? { keywords: cleanKeywords } : {}),
+            searchEngine: engine,
             ...(effTextModel ? { textModel: effTextModel } : {}),
             ...(effImageModel ? { imageModel: effImageModel } : {}),
           },
@@ -152,6 +176,15 @@ function GenerateAutoForm() {
             geração manual com URLs.
           </p>
 
+          {/* Motor de busca: Firecrawl (padrão) busca e o modelo de texto escreve;
+              Sonar busca e escreve nativamente. Se o Firecrawl falhar, o servidor
+              cai no Sonar automaticamente. Lista estática, sempre disponível. */}
+          <EngineSelect
+            value={engine}
+            onChange={handleEngineChange}
+            disabled={loading}
+          />
+
           {/* Seletores de modelo (texto + imagem). Empilham no mobile. Se a lista
               falhar, somem e a geração usa o padrão do servidor (Sonar). */}
           {modelsLoading ? (
@@ -163,7 +196,7 @@ function GenerateAutoForm() {
             <div className="grid gap-4 sm:grid-cols-2">
               <ModelSelect
                 label="Modelo de texto"
-                models={models.textWeb}
+                models={textList ?? models.text}
                 value={effTextModel}
                 onChange={setTextModel}
                 disabled={loading}

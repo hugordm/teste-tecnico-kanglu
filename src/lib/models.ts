@@ -44,31 +44,28 @@ const MAX_TEXT = 14;
 const MAX_IMAGE = 10;
 
 // ---------------------------------------------------------------------------
-// Curadoria por FLUXO no seletor de TEXTO.
+// Duas listas de TEXTO, escolhidas pelo MOTOR de busca do generate-auto.
 //
-// generate-auto (busca web): o modelo PRECISA acionar o plugin `web` da
-// OpenRouter (ou buscar nativamente, caso do Sonar) e devolver fontes reais.
-// Na prática, modelos "lite" (flash-lite, mini, nano, haiku) NÃO acionam bem o
-// plugin → voltam sem fontes → 422. Já os "grandes" (GPT-4/5, Claude Sonnet/
-// Opus, Gemini Pro, DeepSeek, etc.) e o Sonar (nativo) trazem fontes. Então a
-// lista do generate-auto exclui os lite POR CRITÉRIO DE ID (sem testar modelo,
-// economizando crédito da OpenRouter).
+// - `text` (AMPLA, inclui lite): usada pelo generate manual E pelo generate-auto
+//   quando o motor é o FIRECRAWL — nesse caso o Firecrawl busca e o modelo só
+//   ESCREVE, então qualquer modelo serve (inclusive lite).
+// - `textWeb` (ROBUSTA, sem lite + Sonar no topo): usada pelo generate-auto quando
+//   o motor é o SONAR. Aí o modelo não-Sonar precisa acionar o plugin `web` da
+//   OpenRouter pra buscar, e os "lite" (flash-lite, mini, nano, haiku) NÃO
+//   acionam bem → voltariam sem fontes → 422. Por isso escondemos os lite nessa
+//   lista, POR CRITÉRIO DE ID (sem testar modelo, economizando crédito).
 //
-// generate (manual com URLs): NÃO há busca — o modelo só escreve a partir das
-// URLs dadas. Qualquer modelo de texto serve, inclusive os lite (que escrevem
-// bem). Por isso a lista `text` continua ampla.
-//
-// IMAGEM: não depende de busca — a lista de imagem é a mesma nos dois fluxos.
+// IMAGEM: não depende de busca — a lista de imagem é a mesma em tudo.
 // ---------------------------------------------------------------------------
 
 /**
  * Marcadores de id que caracterizam um modelo "lite" — barato/pequeno, que não
- * aciona bem a busca web. Excluídos SÓ da lista do generate-auto (textWeb).
+ * aciona bem a busca web (plugin). Escondidos SÓ da lista `textWeb` (motor Sonar).
  * `flash-lite` já cai em `lite`. Ajuste aqui se surgir uma nova família lite.
  */
 const LITE_ID_MARKERS = ["lite", "mini", "nano", "haiku"];
 
-/** true se o id parece um modelo "lite" (busca web fraca) — ver acima. */
+/** true se o id parece um modelo "lite" (busca web fraca via plugin) — ver acima. */
 function isLiteModel(id: string): boolean {
   const lower = id.toLowerCase();
   return LITE_ID_MARKERS.some((marker) => lower.includes(marker));
@@ -84,15 +81,12 @@ export interface ModelInfo {
 }
 
 export interface CuratedModels {
-  /** Lista AMPLA de texto (inclui lite) — usada pelo generate manual com URLs. */
+  /** Lista AMPLA de texto (inclui lite) — generate manual e generate-auto/Firecrawl. */
   text: ModelInfo[];
-  /**
-   * Lista CURADA de texto para o generate-auto (busca web): só modelos robustos
-   * (não-lite) + o Sonar nativo. Ver isLiteModel / bloco de curadoria por fluxo.
-   */
+  /** Lista ROBUSTA de texto (sem lite, Sonar no topo) — generate-auto/Sonar. */
   textWeb: ModelInfo[];
   image: ModelInfo[];
-  /** Ids default (do env) para pré-selecionar em cada fluxo. */
+  /** Ids default (do env) para pré-selecionar em cada fluxo/motor. */
   defaults: { text: string; textWeb: string; image: string };
 }
 
@@ -155,7 +149,7 @@ function synthInfo(id: string): ModelInfo {
 
 // Conjunto FIXO usado se a API de modelos falhar — os defaults atuais + alguns
 // conhecidos, pra o seletor nunca ficar vazio. Mistura lite e robustos: a lista
-// ampla (text) usa tudo; a de busca (textWeb) filtra os lite fora.
+// ampla (text) usa tudo; a robusta (textWeb) filtra os lite fora.
 const FALLBACK_TEXT: ModelInfo[] = [
   "perplexity/sonar",
   "openai/gpt-5",
@@ -219,9 +213,9 @@ function curateText(raw: RawModel[]): ModelInfo[] {
 }
 
 /**
- * Ordena a lista de busca web pondo os modelos NATIVOS (Sonar) na frente — é o
- * default recomendado do generate-auto, então aparece no topo do seletor.
- * Estável: preserva a ordem relativa dentro de cada grupo.
+ * Ordena a lista robusta pondo os modelos NATIVOS (Sonar) na frente — é o default
+ * recomendado do motor Sonar, então aparece no topo do seletor. Estável: preserva
+ * a ordem relativa dentro de cada grupo.
  */
 function nativeWebFirst(list: ModelInfo[]): ModelInfo[] {
   const native = list.filter((m) => isNativeWebSearchModel(m.id));
@@ -238,7 +232,7 @@ export async function getCuratedModels(): Promise<CuratedModels> {
   const raw = await fetchRawModels();
 
   if (!raw) {
-    // textWeb do fallback: mesma lista fixa SEM os lite + garante o Sonar.
+    // textWeb do fallback: mesma lista fixa SEM os lite + garante o Sonar no topo.
     const fallbackWeb = ensureIds(
       nativeWebFirst(FALLBACK_TEXT.filter((m) => !isLiteModel(m.id))),
       [defaults.textWeb],
@@ -257,7 +251,9 @@ export async function getCuratedModels(): Promise<CuratedModels> {
   const notVariant = (m: RawModel) => !m.id.startsWith("~");
   const known = (m: RawModel) => PROVIDERS[providerOf(m.id)] !== undefined;
 
-  // TEXTO: provedor conhecido, gera texto e NÃO é modelo de imagem.
+  // TEXTO (lista AMPLA): provedor conhecido, gera texto e NÃO é modelo de imagem.
+  // Inclui lite — usada pelo generate manual e pelo generate-auto/Firecrawl (o
+  // motor busca, o modelo só escreve). Garante o default de texto e o Sonar.
   const textRaw = raw.filter(
     (m) =>
       notVariant(m) &&
@@ -267,10 +263,9 @@ export async function getCuratedModels(): Promise<CuratedModels> {
   );
   const text = ensureIds(curateText(textRaw), [defaults.text, defaults.textWeb], byId);
 
-  // TEXTO (busca web / generate-auto): mesma base, mas SEM os lite — filtrados
+  // TEXTO (lista ROBUSTA / motor Sonar): mesma base, mas SEM os lite — filtrados
   // ANTES do curateText pra não sumir com um provedor inteiro caso seus 2 mais
-  // recentes sejam lite. Sonar (nativo) no topo; só o default textWeb é forçado
-  // (nunca o default lite de texto). Ver bloco de curadoria por fluxo no topo.
+  // recentes sejam lite. Sonar (nativo) no topo; só o default textWeb é forçado.
   const textWebRaw = textRaw.filter((m) => !isLiteModel(m.id));
   const textWeb = ensureIds(
     nativeWebFirst(curateText(textWebRaw)),
@@ -300,8 +295,8 @@ export async function validateModelId(
 ): Promise<string | undefined> {
   if (!id) return undefined;
   const curated = await getCuratedModels();
-  // "textWeb" valida contra a lista curada de busca (só robustos + Sonar): um
-  // lite escolhido à mão no generate-auto é rejeitado aqui → cai no default.
+  // "textWeb" valida contra a lista robusta (sem lite): um lite escolhido à mão
+  // com o motor Sonar é rejeitado aqui → cai no default robusto (Sonar).
   const list = curated[kind];
   return list.some((m) => m.id === id) ? id : undefined;
 }

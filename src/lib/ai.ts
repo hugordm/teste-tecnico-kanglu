@@ -3,6 +3,12 @@ import { slugify } from "@/lib/validation";
 import type { ExtractedSource } from "@/lib/extract";
 import { resolveWebSources, type ResolvedSource } from "@/lib/web-sources";
 import { parseJsonLoose } from "@/lib/json-extract";
+import { isCompetitorUrl } from "@/lib/competitors";
+import {
+  firecrawlSearch,
+  FirecrawlError,
+  type FirecrawlSearchResult,
+} from "@/lib/firecrawl";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -276,6 +282,126 @@ export async function generateDraftWithWebSearch(
 
   // Todas as tentativas voltaram sem fontes válidas. Devolve a última (sources:[]).
   return last as GenerateWithWebResult;
+}
+
+// ---------------------------------------------------------------------------
+// Geração por tema com busca web via FIRECRAWL (motor padrão do generate-auto)
+// ---------------------------------------------------------------------------
+//
+// Caminho ADITIVO e paralelo ao Sonar (que continua intocado acima). Aqui a
+// BUSCA é do Firecrawl e a ESCRITA é do modelo de texto do seletor — separadas,
+// diferente do Sonar (que busca+escreve junto). O Firecrawl só conhece a web;
+// TODAS as regras/proteções continuam sendo aplicadas por ESTE pipeline:
+//   1. Filtro de concorrentes (competitors.ts) nas fontes, ANTES de escrever.
+//   2. SYSTEM_PROMPT completo vai ao modelo escritor — via `generateDraft`, que
+//      já usa exatamente o mesmo prompt e a mesma validação do fluxo manual.
+//   3. Limpeza da saída (tags <cite>, marcadores [1], extração robusta de JSON)
+//      — também dentro de `generateDraft` (safeParseDraft/stripCitationMarkers).
+//   4. O portão de publicação (422 se zero fontes) fica na rota, como já é.
+//
+// Se o Firecrawl falhar (erro/limite/timeout) OU não sobrar nenhuma fonte
+// não-concorrente, esta função LANÇA — a rota captura e cai no Sonar (fallback).
+
+/**
+ * Teto de caracteres do markdown de cada fonte do Firecrawl que vai pro modelo.
+ * Mesmo espírito do MAX_TEXT_CHARS da extração manual: síntese sem estourar
+ * contexto/custo. Uma página scrapeada inteira pode ser bem maior que isto.
+ */
+const FIRECRAWL_MAX_TEXT_CHARS = 12_000;
+
+/**
+ * Gera um rascunho onde o FIRECRAWL busca as fontes e o MODELO DE TEXTO escreve.
+ * Reusa o mesmo `SYSTEM_PROMPT` e a mesma validação (via `generateDraft`), então
+ * as regras factuais e de marca são idênticas às dos outros fluxos.
+ *
+ * Lança `FirecrawlError` se a busca falhar OU se, depois de descartar
+ * concorrentes/duplicatas, não sobrar nenhuma fonte aproveitável — em ambos os
+ * casos a rota cai no Sonar (fallback). Pode propagar `AiError` da escrita.
+ */
+export async function generateDraftWithFirecrawl(
+  params: GenerateWithWebParams,
+): Promise<GenerateWithWebResult> {
+  const { theme, keywords, model } = params;
+
+  // BUSCA: só o Firecrawl. Pode lançar FirecrawlError (rota → fallback Sonar).
+  const results = await firecrawlSearch(theme);
+
+  // CAMADA 1 — filtro de concorrentes + dedupe, ANTES de escrever. O Firecrawl
+  // devolve URL real (sem redirect do Google), então filtramos direto.
+  const sources = filterFirecrawlSources(results);
+  if (sources.length === 0) {
+    // Nada não-concorrente aproveitável: sinaliza o fallback pro Sonar (que pode
+    // achar fontes neutras). Não gastamos o modelo escritor à toa.
+    throw new FirecrawlError(
+      "Firecrawl não retornou fontes não-concorrentes aproveitáveis",
+    );
+  }
+
+  // ESCRITA: o modelo do seletor escreve a partir do conteúdo buscado. Decisão:
+  // se o modelo escolhido for o Sonar (perplexity/*), ele NÃO é um bom escritor
+  // puro e rejeita `response_format: json_object` — então escrevemos com o modelo
+  // de texto padrão (OPENROUTER_MODEL). Qualquer outro modelo escolhido é usado.
+  const writingModel =
+    model && !model.startsWith("perplexity/") ? model : undefined;
+
+  // CAMADAS 2 e 3 (SYSTEM_PROMPT completo + limpeza/JSON robusto) vivem aqui.
+  const { draft, model: usedModel } = await generateDraft({
+    theme,
+    keywords,
+    sources,
+    model: writingModel,
+  });
+
+  return {
+    draft,
+    model: usedModel,
+    sources: sources.map((s) => ({ title: s.title, url: s.url })),
+  };
+}
+
+/**
+ * Converte os resultados do Firecrawl em fontes aproveitáveis: descarta
+ * concorrentes (competitors.ts) e duplicatas (por host+path), e trunca o
+ * markdown ao teto. Devolve `ExtractedSource[]` — o mesmo shape que o
+ * `generateDraft` (fluxo manual) já consome. Pode devolver lista vazia.
+ */
+function filterFirecrawlSources(
+  results: FirecrawlSearchResult[],
+): ExtractedSource[] {
+  const seen = new Set<string>();
+  const out: ExtractedSource[] = [];
+
+  for (const r of results) {
+    if (isCompetitorUrl(r.url)) {
+      console.warn(`[firecrawl] concorrente descartado: ${r.url}`);
+      continue;
+    }
+    const key = firecrawlDedupeKey(r.url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const textContent = r.markdown.slice(0, FIRECRAWL_MAX_TEXT_CHARS);
+    out.push({
+      title: r.title,
+      url: r.url,
+      excerpt: textContent.slice(0, 280).trim(),
+      textContent,
+    });
+  }
+
+  return out;
+}
+
+/** Chave de dedup: host + pathname (ignora query/hash e barra final). */
+function firecrawlDedupeKey(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const path = u.pathname.replace(/\/+$/, "");
+    return `${host}${path}`;
+  } catch {
+    return url;
+  }
 }
 
 /**
