@@ -1,11 +1,7 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { signToken, AUTH_COOKIE } from "@/lib/auth";
-
-const loginInput = z.object({
-  email: z.email("E-mail inválido"),
-  password: z.string().min(1, "Senha é obrigatória"),
-});
+import { loginInput } from "@/lib/api-schemas";
 
 // 7 dias, em segundos — casa com a validade do JWT (arquivo 3).
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7;

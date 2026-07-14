@@ -6,26 +6,12 @@ import { extractMany } from "@/lib/extract";
 import { generateDraft, AiError } from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
 import { validateModelId } from "@/lib/models";
+import { generateInput } from "@/lib/api-schemas";
 import { z } from "zod";
 
 // O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
 // então fixamos o runtime nodejs (mesmo motivo do /generate-image).
 export const runtime = "nodejs";
-
-/**
- * Entrada do POST /api/articles/generate.
- * Só `theme` é obrigatório — dá pra gerar sem fontes (o prompt segura a mão
- * contra inventar dados quando não há material).
- */
-const generateInput = z.object({
-  theme: z.string().trim().min(1, "Tema é obrigatório"),
-  keywords: z.array(z.string().trim().min(1)).optional(),
-  urls: z.array(z.url("URL de fonte inválida")).optional(),
-  // Modelos escolhidos nos seletores (opcionais). São VALIDADOS contra a lista
-  // curada antes de usar — string arbitrária é descartada e cai no default.
-  textModel: z.string().optional(),
-  imageModel: z.string().optional(),
-});
 
 /**
  * POST /api/articles/generate  (protegido)

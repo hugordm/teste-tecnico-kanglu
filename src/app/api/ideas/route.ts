@@ -1,17 +1,10 @@
 import { getAuth } from "@/lib/auth";
 import { suggestIdeas, IdeasError } from "@/lib/ideas";
+import { ideasInput } from "@/lib/api-schemas";
 import { z } from "zod";
 
 // Usa o SDK fetch (OpenRouter) no runtime Node, alinhado às outras rotas de IA.
 export const runtime = "nodejs";
-
-/**
- * Entrada do POST /api/ideas. Só `theme` (opcional): vazio → pautas gerais do
- * nicho; preenchido → pautas focadas nele. Teto de tamanho contém abuso trivial.
- */
-const ideasInput = z.object({
-  theme: z.string().trim().max(200).optional(),
-});
 
 /**
  * POST /api/ideas  (protegido)

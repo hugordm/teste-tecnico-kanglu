@@ -10,7 +10,7 @@ Projeto desenvolvido como teste técnico para a vaga de Desenvolvedor(a) Fullsta
 | **Blog público** | https://teste-tecnico-kanglu-eosin.vercel.app/blog |
 | **Painel admin** | https://teste-tecnico-kanglu-eosin.vercel.app/admin |
 | **Login de teste** | `admin@kanglu.test` / `kanglu123` |
-| **Documentação da API** | [`API.md`](./API.md) |
+| **Documentação da API** | [`API.md`](./API.md) (referência) · **Swagger interativo** em `/api-doc` |
 
 > **Disclaimer de IA:** os rascunhos são gerados com assistência de IA e **revisados manualmente** antes da publicação. Cada afirmação factual é ancorada em fontes reais, listadas ao final de cada artigo. O fluxo com URLs usa `google/gemini-3.1-flash-lite`; na busca por tema, as fontes vêm do **Firecrawl** (motor padrão, via API direta) ou do **Perplexity Sonar**, e o modelo de texto escolhido escreve a partir delas; as imagens usam `google/gemini-3.1-flash-lite-image` (Nano Banana 2); o assistente do blog usa `google/gemini-3.1-flash-lite` — modelos de IA via OpenRouter.
 
@@ -107,6 +107,10 @@ Cada tela de geração tem um seletor com a **logo do provedor** + nome do model
 - **Geração com URLs** (`generate`): aceita a lista **ampla** (inclusive lite), já que não há busca — o modelo só escreve a partir das URLs.
 
 A imagem tem sua própria lista (não depende de busca), com o Nano Banana 2 como padrão. Toda escolha é **validada contra a allowlist** curada no servidor (no `generate-auto`, **conforme o motor**): um id arbitrário — ou um lite com o motor Sonar — é descartado e cai no default. Se a API de modelos falhar, um **fallback** fixo mantém o seletor utilizável.
+
+### Documentação da API (Swagger interativo)
+
+Além do [`API.md`](./API.md) — referência estática, legível direto no GitHub sem subir o projeto —, a API tem uma **doc interativa e testável** em **`/api-doc`**, renderizada pelo **Scalar**. A spec **OpenAPI 3.1** é servida em `GET /api/openapi` e gerada de forma **híbrida**: os **corpos de requisição vêm dos próprios schemas Zod** das rotas (via `z.toJSONSchema` — fonte única, sem drift), e paths/parâmetros/respostas/auth são anotados à mão refletindo os **status reais**. Escolhemos o Scalar em vez do `swagger-ui-react` porque ele renderiza **fora da árvore React** (route handler → HTML), evitando o conflito do swagger-ui com o **React 19** (que removeu `ReactDOM.findDOMNode`). A página é **pública** (a doc não é segredo); o "Try it out" usa o cookie JWT de mesma origem, então os endpoints protegidos só respondem logado (deslogado retornam `401`, honestamente).
 
 ### Sugestão de pautas
 
@@ -217,6 +221,7 @@ src/
       chat/route.ts                  # assistente do blog (público)
       ideas/route.ts                 # sugestão de pautas (IA)
       models/route.ts                # lista curada de modelos (seletor)
+      openapi/route.ts               # spec OpenAPI 3.1 (JSON, pública)
       articles/
         route.ts                     # GET (lista) + POST (cria draft)
         [id]/route.ts                # GET / PATCH / DELETE
@@ -225,6 +230,7 @@ src/
         [id]/generate-image/route.ts # gera 4 imagens → Vercel Blob
         generate/route.ts            # geração com URLs (Gemini)
         generate-auto/route.ts       # busca automática por tema (Firecrawl padrão | Sonar)
+    api-doc/route.ts                 # Swagger interativo (Scalar) — público
     admin/                           # login, painel, editor, geradores, pautas
     blog/
       layout.tsx                     # injeta o chatbot em /blog/*
@@ -239,9 +245,10 @@ src/
     cover-image.tsx                  # capa + crédito do modelo
     blog-chat.tsx                    # widget flutuante do chatbot
   lib/
-    prisma, auth, validation, extract, ai, image, article-image,
-    body-images, web-sources, firecrawl, competitors, chat, public-articles,
-    site, categories, models, ideas, reading-time, json-extract, toc
+    prisma, auth, validation, api-schemas, openapi, extract, ai, image,
+    article-image, body-images, web-sources, firecrawl, competitors, chat,
+    public-articles, site, categories, models, ideas, reading-time,
+    json-extract, toc
   proxy.ts                           # proteção das rotas /admin
 API.md                               # documentação das rotas
 ```

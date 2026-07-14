@@ -9,28 +9,12 @@ import {
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
 import { validateModelId, isNativeWebSearchModel } from "@/lib/models";
 import { normalizeCategory } from "@/lib/categories";
+import { generateAutoInput } from "@/lib/api-schemas";
 import { z } from "zod";
 
 // O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
 // então fixamos o runtime nodejs (mesmo motivo do /generate-image).
 export const runtime = "nodejs";
-
-/**
- * Entrada do POST /api/articles/generate-auto.
- * Só `theme` é obrigatório — aqui NÃO há URLs: as fontes são buscadas na web
- * pelo próprio modelo (plugin `web` da OpenRouter).
- */
-const generateAutoInput = z.object({
-  theme: z.string().trim().min(1, "Tema é obrigatório"),
-  keywords: z.array(z.string().trim().min(1)).optional(),
-  // Modelos escolhidos (opcionais), VALIDADOS contra a lista curada.
-  textModel: z.string().optional(),
-  imageModel: z.string().optional(),
-  // Motor de busca web: Firecrawl (padrão) busca e o modelo escreve; Sonar busca
-  // e escreve nativamente (fluxo original). Valor inválido/ausente cai no padrão
-  // (Firecrawl) — mesma filosofia leniente do seletor de modelo.
-  searchEngine: z.enum(["firecrawl", "sonar"]).default("firecrawl").catch("firecrawl"),
-});
 
 /**
  * POST /api/articles/generate-auto  (protegido)

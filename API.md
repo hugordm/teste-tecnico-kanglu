@@ -2,6 +2,8 @@
 
 Referência de todas as rotas. As rotas de escrita exigem autenticação (JWT em cookie `httpOnly`). As rotas públicas do blog e o chat não exigem autenticação.
 
+> **Versão interativa:** este documento é a referência estática (legível direto no GitHub). Com o projeto rodando, há também um **Swagger interativo e testável** em **`/api-doc`** (Scalar), cuja spec **OpenAPI 3.1** fica em `GET /api/openapi` — os corpos de requisição são gerados dos próprios schemas Zod das rotas.
+
 **Login de teste:** `admin@kanglu.test` / `kanglu123`
 
 **Convenção de status HTTP:**

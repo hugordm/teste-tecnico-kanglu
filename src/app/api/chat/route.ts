@@ -1,30 +1,9 @@
 import { z } from "zod";
-import {
-  answerBlogQuestion,
-  ChatError,
-  MAX_HISTORY_MESSAGES,
-  MAX_MESSAGE_CHARS,
-} from "@/lib/chat";
+import { answerBlogQuestion, ChatError } from "@/lib/chat";
+import { chatInput } from "@/lib/api-schemas";
 
 // Usa Prisma (via lib/chat → public-articles) e o SDK fetch no runtime Node.
 export const runtime = "nodejs";
-
-/**
- * Entrada do POST /api/chat. Histórico da conversa; cada mensagem é do usuário
- * ou do assistente. Tetos de tamanho/quantidade contêm abuso trivial num
- * endpoint público (o próprio lib/chat também corta as últimas N).
- */
-const chatInput = z.object({
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(["user", "assistant"]),
-        content: z.string().trim().min(1).max(MAX_MESSAGE_CHARS),
-      }),
-    )
-    .min(1, "Envie ao menos uma mensagem")
-    .max(MAX_HISTORY_MESSAGES * 4), // teto generoso; lib/chat usa só as últimas N
-});
 
 /**
  * POST /api/chat  (PÚBLICO — é o chatbot do blog público, sem auth)
