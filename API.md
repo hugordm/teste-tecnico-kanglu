@@ -67,10 +67,16 @@ Geração **com fontes fornecidas** (tema + palavras-chave + URLs). Extrai o tex
 **Respostas:** `201` (draft com fontes, categoria sugerida e opções de imagem) · `400` · `401` · `502`.
 
 ### `POST /api/articles/generate-auto`
-Geração por **busca automática** (apenas o tema). O modelo de busca pesquisa a web; as URLs são filtradas contra concorrentes; o rascunho é ancorado nas fontes válidas. Também sugere `category` e gera 4 opções de imagem.
-**Corpo:** `{ "theme": "...", "keywords": ["..."], "textModel": "...", "imageModel": "..." }`
-`textModel` é validado contra a lista curada **de busca** (só modelos robustos + Sonar); um "lite" é descartado e cai no Sonar. O Sonar busca nativamente; outro modelo recebe o plugin `web` da OpenRouter.
-**Respostas:** `201` · `422` se nenhuma fonte válida for encontrada (a mensagem orienta usar o Sonar/um modelo mais robusto quando o modelo escolhido não trouxe fontes) · `400` · `401` · `502`.
+Geração por **busca automática** (apenas o tema). Um **motor de busca** encontra as fontes na web; as URLs são filtradas contra concorrentes; o rascunho é ancorado nas fontes válidas. Também sugere `category` e gera 4 opções de imagem.
+**Corpo:** `{ "theme": "...", "keywords": ["..."], "searchEngine": "firecrawl"|"sonar", "textModel": "...", "imageModel": "..." }`
+- `searchEngine` (**opcional**, default `"firecrawl"`; valor inválido cai no default):
+  - `"firecrawl"` — o Firecrawl (`POST /v2/search`, API direta) busca e traz o conteúdo em markdown; o **modelo de texto escolhido escreve** a partir dessas fontes.
+  - `"sonar"` — o Perplexity Sonar busca e escreve nativamente (um modelo não-Sonar recebe o plugin `web` da OpenRouter).
+  - **Fallback:** se o Firecrawl falhar (erro/limite/timeout) ou não sobrar fonte não-concorrente, cai automaticamente no Sonar.
+- `textModel` é validado **conforme o motor**: com `firecrawl`, contra a lista **ampla** (qualquer modelo, inclusive lite — só escreve); com `sonar`, contra a lista **robusta** (um "lite" é descartado e cai no default robusto). `imageModel` é validado contra a lista de imagem. Um id inválido/ausente cai no default do ambiente.
+
+As quatro proteções (filtro de concorrentes, `SYSTEM_PROMPT` completo, limpeza determinística da saída, portão `422`) valem nos dois motores — o Firecrawl só substitui a etapa de busca.
+**Respostas:** `201` · `422` se nenhuma fonte válida for encontrada (após o fallback; a mensagem orienta usar o Sonar/um modelo mais robusto ou a geração manual) · `400` · `401` · `502`.
 
 ### `POST /api/articles/[id]/generate-image`
 Gera **4 novas opções** de imagem (Nano Banana 2) em paralelo, faz upload no Vercel Blob e as associa ao artigo (a 1ª vira capa). Descarta do Blob as opções anteriores não usadas. Aceita opcionalmente `imageModel` (validado contra a lista curada de imagem).
@@ -78,7 +84,7 @@ Gera **4 novas opções** de imagem (Nano Banana 2) em paralelo, faz upload no V
 
 ### `GET /api/models`
 Lista **curada** de modelos da OpenRouter para os seletores de geração (cacheada 6h; fallback fixo se a API falhar). Só admin autenticado.
-**Resposta:** `200` `{ "text": [...], "textWeb": [...], "image": [...], "defaults": { "text": "...", "textWeb": "...", "image": "..." } }` — cada modelo traz `{ id, name, provider, providerLabel, logo }`. `text` é a lista ampla (fluxo com URLs); `textWeb` é a lista curada de busca (só robustos + Sonar); `image` é a lista de imagem. `401` sem autenticação.
+**Resposta:** `200` `{ "text": [...], "textWeb": [...], "image": [...], "defaults": { "text": "...", "textWeb": "...", "image": "..." } }` — cada modelo traz `{ id, name, provider, providerLabel, logo }`. `text` é a lista ampla (fluxo com URLs e `generate-auto` com motor Firecrawl); `textWeb` é a lista robusta (`generate-auto` com motor Sonar: só robustos + Sonar); `image` é a lista de imagem. O cliente escolhe entre `text`/`textWeb` conforme o motor selecionado. `401` sem autenticação.
 
 ---
 

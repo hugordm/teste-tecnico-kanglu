@@ -12,7 +12,7 @@ Projeto desenvolvido como teste técnico para a vaga de Desenvolvedor(a) Fullsta
 | **Login de teste** | `admin@kanglu.test` / `kanglu123` |
 | **Documentação da API** | [`API.md`](./API.md) |
 
-> **Disclaimer de IA:** os rascunhos são gerados com assistência de IA e **revisados manualmente** antes da publicação. Cada afirmação factual é ancorada em fontes reais, listadas ao final de cada artigo. A geração de texto usa `google/gemini-3.1-flash-lite` (fluxo com URLs) e `perplexity/sonar` (busca por tema); as imagens usam `google/gemini-3.1-flash-lite-image` (Nano Banana 2); o assistente do blog usa `google/gemini-3.1-flash-lite` — todos via OpenRouter.
+> **Disclaimer de IA:** os rascunhos são gerados com assistência de IA e **revisados manualmente** antes da publicação. Cada afirmação factual é ancorada em fontes reais, listadas ao final de cada artigo. O fluxo com URLs usa `google/gemini-3.1-flash-lite`; na busca por tema, as fontes vêm do **Firecrawl** (motor padrão, via API direta) ou do **Perplexity Sonar**, e o modelo de texto escolhido escreve a partir delas; as imagens usam `google/gemini-3.1-flash-lite-image` (Nano Banana 2); o assistente do blog usa `google/gemini-3.1-flash-lite` — modelos de IA via OpenRouter.
 
 ---
 
@@ -26,6 +26,7 @@ Projeto desenvolvido como teste técnico para a vaga de Desenvolvedor(a) Fullsta
 | Autenticação | **jose** (JWT) | Tokens compatíveis com qualquer runtime do Next |
 | Validação | **zod** | Validação de entrada e da saída da IA |
 | IA (texto) | **OpenRouter** | `gemini-3.1-flash-lite` (com fontes) e `perplexity/sonar` (busca web) |
+| Busca web (por tema) | **Firecrawl** (`/v2/search`) + **Perplexity Sonar** | Motor de busca das fontes no fluxo por tema — Firecrawl padrão, Sonar alternativo e fallback |
 | IA (imagem) | **Nano Banana 2** (`gemini-3.1-flash-lite-image`) | Ilustrações de capa e de corpo |
 | IA (chat) | **Gemini flash-lite** (OpenRouter) | Assistente do blog com contexto dos artigos |
 | Storage de imagens | **Vercel Blob** | Hospedagem pública das imagens geradas |
@@ -38,7 +39,7 @@ Projeto desenvolvido como teste técnico para a vaga de Desenvolvedor(a) Fullsta
 
 ## Como rodar do zero
 
-Pré-requisitos: Node.js 20+, um banco PostgreSQL, uma chave da OpenRouter e (para imagens) um token do Vercel Blob.
+Pré-requisitos: Node.js 20+, um banco PostgreSQL, uma chave da OpenRouter e (para imagens) um token do Vercel Blob. Opcionalmente, uma chave do Firecrawl para a busca por tema — sem ela, esse fluxo usa o Sonar.
 
 ```bash
 git clone https://github.com/hugordm/teste-tecnico-kanglu.git
@@ -65,8 +66,9 @@ O projeto sobe em poucos minutos. A geração por IA, as imagens e o chatbot sã
 | `ADMIN_EMAIL` | E-mail de login do admin |
 | `ADMIN_PASSWORD` | Senha de login do admin |
 | `OPENROUTER_API_KEY` | Chave da OpenRouter (texto, imagem e chat) |
+| `FIRECRAWL_API_KEY` | Chave do Firecrawl (`fc-…`) — motor de busca **padrão** do fluxo por tema. Sem ela (ou se o Firecrawl falhar/esgotar crédito), a busca cai no Sonar |
 | `OPENROUTER_MODEL` | **Default** do modelo de geração com fontes (padrão: `google/gemini-3.1-flash-lite`) |
-| `WEB_SEARCH_MODEL` | **Default** do modelo de busca web por tema (padrão: `perplexity/sonar`) |
+| `WEB_SEARCH_MODEL` | **Default** do modelo de busca web por tema com o motor Sonar (padrão: `perplexity/sonar`) |
 | `OPENROUTER_IMAGE_MODEL` | **Default** do modelo de imagem (padrão: `google/gemini-3.1-flash-lite-image`) |
 | `OPENROUTER_CHAT_MODEL` | Modelo do assistente do blog (padrão: `google/gemini-3.1-flash-lite`) |
 | `OPENROUTER_IDEAS_MODEL` | Modelo da sugestão de pautas (padrão: `google/gemini-3.1-flash-lite`) |
@@ -83,18 +85,28 @@ Os modelos têm valores padrão no código; só é preciso defini-los para sobre
 
 **1. Geração com fontes (manual)** — `/admin/generate`. O usuário fornece um tema e URLs de referência. O sistema extrai o texto das URLs (Readability + linkedom) e gera o rascunho com o Gemini, ancorado nesse material. Controle total sobre as fontes.
 
-**2. Busca automática por tema** — `/admin/generate-auto`. O usuário fornece apenas o tema. O Perplexity Sonar (que sempre pesquisa a web) encontra fontes reais, o sistema filtra concorrentes automaticamente e gera o rascunho ancorado nas fontes encontradas.
+**2. Busca automática por tema** — `/admin/generate-auto`. O usuário fornece apenas o tema e escolhe o **motor de busca** (ver abaixo). O motor encontra fontes reais na web, o sistema filtra concorrentes automaticamente e gera o rascunho ancorado nas fontes encontradas.
 
 Em ambos, o rascunho nasce como assistido por IA e é **revisado pelo autor** antes de publicar. Também há criação totalmente manual.
 
+### Motor de busca por tema (Firecrawl | Sonar)
+
+O `generate-auto` tem um **seletor de motor de busca**, com dois caminhos:
+
+- **Firecrawl** (padrão): busca as fontes via **API direta** (`POST /v2/search`) e traz o conteúdo de cada página já em **markdown**. O sistema filtra os concorrentes dessas fontes e o **modelo de texto escolhido escreve** o artigo a partir do material trazido — busca e escrita são etapas separadas.
+- **Sonar**: o Perplexity Sonar **busca e escreve nativamente** (e um modelo não-Sonar recebe o plugin `web` da OpenRouter para buscar). É o comportamento original, mantido como opção.
+- **Fallback automático**: se o Firecrawl falhar (erro, limite de crédito, timeout) **ou** não sobrar nenhuma fonte não-concorrente, a busca cai no **Sonar** automaticamente — a geração não quebra por causa da busca. Só se o Sonar também falhar vira erro (`502`).
+
+As **quatro camadas de proteção** valem nos **dois motores** (o Firecrawl só busca — quem aplica as regras é o pipeline): (1) **filtro de concorrentes** sobre as fontes, antes de escrever; (2) o **SYSTEM_PROMPT completo** (anti-invenção, regra de marca, anti-LaTeX, sugestão de categoria) vai ao modelo que escreve; (3) **limpeza determinística** da saída (tags `<cite>`, marcadores `[1]`, extração tolerante de JSON); (4) o **portão de publicação** (`422` sem fonte válida).
+
 ### Seletor de modelo (texto + imagem)
 
-Cada tela de geração tem um seletor com a **logo do provedor** + nome do modelo, alimentado por uma **lista curada da OpenRouter** buscada em runtime (`GET /api/models`, cacheada 6h; provedores conhecidos, logos self-hosted em `public/providers/`). A curadoria é **por fluxo**:
+Cada tela de geração tem um seletor com a **logo do provedor** + nome do modelo, alimentado por uma **lista curada da OpenRouter** buscada em runtime (`GET /api/models`, cacheada 6h; provedores conhecidos, logos self-hosted em `public/providers/`). A lista de **texto** depende do fluxo — e, no `generate-auto`, do **motor**:
 
-- **Busca por tema** (`generate-auto`): só modelos **robustos + o Sonar**. Modelos "lite" (que contêm `lite`/`mini`/`nano`/`haiku` no id) são filtrados fora, porque na prática não acionam bem o plugin de busca web da OpenRouter e voltam sem fontes. O Sonar busca nativamente; qualquer outro modelo recebe o plugin `web` para trazer as fontes no mesmo formato.
+- **Busca por tema** (`generate-auto`): a lista **se adapta ao motor**. Com o **Firecrawl** (padrão), aparecem **todos** os modelos (inclusive os "lite") — o Firecrawl busca e o modelo só escreve, então qualquer modelo serve. Com o **Sonar**, só **modelos robustos + o Sonar**: os "lite" (id com `lite`/`mini`/`nano`/`haiku`) são escondidos, porque nesse motor um modelo não-Sonar precisa acionar o plugin `web` da OpenRouter e os lite não fazem isso bem (voltariam sem fontes). Ao trocar o motor, o seletor atualiza a lista — um lite selecionado é resetado para o default robusto ao mudar para Sonar.
 - **Geração com URLs** (`generate`): aceita a lista **ampla** (inclusive lite), já que não há busca — o modelo só escreve a partir das URLs.
 
-A imagem tem sua própria lista (não depende de busca), com o Nano Banana 2 como padrão. Toda escolha é **validada contra a allowlist** curada no servidor: um id arbitrário é descartado e cai no default do ambiente. Se a API de modelos falhar, um **fallback** fixo mantém o seletor utilizável.
+A imagem tem sua própria lista (não depende de busca), com o Nano Banana 2 como padrão. Toda escolha é **validada contra a allowlist** curada no servidor (no `generate-auto`, **conforme o motor**): um id arbitrário — ou um lite com o motor Sonar — é descartado e cai no default. Se a API de modelos falhar, um **fallback** fixo mantém o seletor utilizável.
 
 ### Sugestão de pautas
 
@@ -158,7 +170,7 @@ As rotas de API vivem em `src/app/api/**/route.ts` e rodam no runtime Node do Ne
 
 ### Um modelo por tarefa
 
-Gemini para gerar a partir de fontes fornecidas (rápido, econômico); Perplexity Sonar para a busca automática, por ser um modelo de busca dedicado que ancora fontes de forma confiável (o Gemini com grounding buscava de forma intermitente); Nano Banana 2 para imagens; Gemini flash-lite para o chat. Todos via OpenRouter, com uma única chave. Esses são os **defaults** — na geração, o seletor de modelo permite escolher outro (curado por fluxo, ver *Seletor de modelo*).
+Gemini para gerar a partir de fontes fornecidas (rápido, econômico); na busca automática por tema, o **Firecrawl** é o motor padrão (busca via API direta e traz o conteúdo em markdown, e o modelo escolhido escreve a partir dele) e o **Perplexity Sonar** é a alternativa e o fallback (busca e escreve nativamente, ancorando fontes de forma confiável — o Gemini com grounding buscava de forma intermitente); Nano Banana 2 para imagens; Gemini flash-lite para o chat. Modelos via OpenRouter com uma única chave; a busca do Firecrawl usa a chave própria. Esses são os **defaults** — na geração, o seletor de modelo permite escolher outro (ver *Seletor de modelo*).
 
 ### O "portão" de publicação
 
@@ -212,7 +224,7 @@ src/
         [id]/regenerate/route.ts     # gerar novamente (das mesmas fontes)
         [id]/generate-image/route.ts # gera 4 imagens → Vercel Blob
         generate/route.ts            # geração com URLs (Gemini)
-        generate-auto/route.ts       # busca automática por tema (Sonar)
+        generate-auto/route.ts       # busca automática por tema (Firecrawl padrão | Sonar)
     admin/                           # login, painel, editor, geradores, pautas
     blog/
       layout.tsx                     # injeta o chatbot em /blog/*
@@ -228,8 +240,8 @@ src/
     blog-chat.tsx                    # widget flutuante do chatbot
   lib/
     prisma, auth, validation, extract, ai, image, article-image,
-    body-images, web-sources, competitors, chat, public-articles, site,
-    categories, models, ideas, reading-time, json-extract, toc
+    body-images, web-sources, firecrawl, competitors, chat, public-articles,
+    site, categories, models, ideas, reading-time, json-extract, toc
   proxy.ts                           # proteção das rotas /admin
 API.md                               # documentação das rotas
 ```
@@ -246,7 +258,7 @@ API.md                               # documentação das rotas
 
 **Obrigatório — completo:** CRUD com estados, autenticação, geração por IA, validação de fontes (portão 422), painel admin, blog público semântico com fontes, regras de conteúdo, SEO (slug, meta tags, sitemap, JSON-LD), identidade Kanglu, 3 artigos com fontes reais e deploy.
 
-**Diferenciais implementados:** SSR/SSG na área pública, robots + sitemap dinâmico, JSON-LD, extração de metadados de URLs, agendamento de publicação, URL canônica automática, busca automática de fontes por tema (Sonar) com filtro de concorrentes, regeneração de rascunho, geração de imagem por IA (4 opções + imagens no corpo) hospedada no Vercel Blob, assistente de IA no blog com contexto dinâmico dos artigos, seletor de modelo curado por fluxo (texto + imagem), sugestão de pautas por IA, categorias com filtro no blog e sugestão automática na geração, busca com folding de acentos, índice do artigo (TOC), tempo de leitura, botões de compartilhar, home com hero/recursos/últimos artigos, layout responsivo (mobile/tablet/desktop) e limpeza robusta da saída dos modelos (extração tolerante de JSON, remoção de tags `<cite>`).
+**Diferenciais implementados:** SSR/SSG na área pública, robots + sitemap dinâmico, JSON-LD, extração de metadados de URLs, agendamento de publicação, URL canônica automática, busca automática de fontes por tema com seletor de motor (Firecrawl padrão via API direta + Sonar como alternativa e fallback) e filtro de concorrentes, regeneração de rascunho, geração de imagem por IA (4 opções + imagens no corpo) hospedada no Vercel Blob, assistente de IA no blog com contexto dinâmico dos artigos, seletor de modelo (texto + imagem) que se adapta ao motor de busca, sugestão de pautas por IA, categorias com filtro no blog e sugestão automática na geração, busca com folding de acentos, índice do artigo (TOC), tempo de leitura, botões de compartilhar, home com hero/recursos/últimos artigos, layout responsivo (mobile/tablet/desktop) e limpeza robusta da saída dos modelos (extração tolerante de JSON, remoção de tags `<cite>`).
 
 **Com mais tempo:** testes automatizados (unitários no portão + e2e do fluxo), CI no GitHub Actions, histórico de versões do rascunho, persistência do texto extraído das fontes (hoje o regenerar re-baixa as URLs), rate-limiting no endpoint público do chat, e RAG (busca semântica) no chatbot caso o volume de artigos cresça.
 
