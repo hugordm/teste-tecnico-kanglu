@@ -67,17 +67,22 @@ export async function getPublishedArticles({
   page = 1,
   pageSize = 6,
   query,
+  category,
 }: {
   page?: number;
   pageSize?: number;
   query?: string;
+  /** Slug de categoria já validado (allowlist); undefined = todas. */
+  category?: string;
 } = {}): Promise<PublishedArticlesPage> {
   const safePageSize = Math.min(Math.max(1, Math.trunc(pageSize)), 50);
   const safePage = Math.max(1, Math.trunc(page));
 
   // Mesmo "agora" para contagem e listagem — evita que um artigo cruze a hora
-  // agendada entre as duas queries e a paginação fique inconsistente.
-  const where = publicWhere();
+  // agendada entre as duas queries e a paginação fique inconsistente. O filtro
+  // de categoria entra AQUI, então convive com busca E paginação sem reescrever
+  // os dois caminhos abaixo: o DB já pré-filtra por categoria em ambos.
+  const where = { ...publicWhere(), ...(category ? { category } : {}) };
 
   const term = query ? foldText(query.trim()) : "";
 
@@ -126,6 +131,24 @@ export async function getPublishedArticles({
     pageSize: safePageSize,
     totalPages: Math.max(1, Math.ceil(total / safePageSize)),
   };
+}
+
+/**
+ * Slugs de categoria que têm PELO MENOS 1 artigo publicado e já visível. Usado
+ * pelos chips do blog para mostrar só categorias com conteúdo (sem chips
+ * vazios). Reusa o mesmo `publicWhere()` — categoria de rascunho/agendado não
+ * conta. `distinct` devolve uma linha por categoria; descartamos o null (artigo
+ * sem categoria). A validação contra a lista fixa fica na página (isCategorySlug).
+ */
+export async function getPublishedCategorySlugs(): Promise<string[]> {
+  const rows = await prisma.article.findMany({
+    where: { ...publicWhere(), category: { not: null } },
+    select: { category: true },
+    distinct: ["category"],
+  });
+  return rows
+    .map((r) => r.category)
+    .filter((c): c is string => c !== null);
 }
 
 /**

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 import { generateUniqueSlug } from "@/lib/validation";
+import { normalizeCategory } from "@/lib/categories";
 import { extractMany } from "@/lib/extract";
 import { generateDraft, AiError } from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
@@ -100,6 +101,9 @@ export async function POST(req: Request) {
       status: "draft", // SEMPRE draft — IA não publica, revisão humana decide
       aiAssisted: true,
       aiModel: model,
+      // Sugestão de categoria da IA (mesmo JSON, sem chamada extra), normalizada
+      // contra a lista fixa → slug válido ou null. Pré-seleciona no editor.
+      category: normalizeCategory(draft.category),
       // Só as fontes que a extração conseguiu ler entram — cada uma com o
       // momento do acesso, pra rastreabilidade do disclaimer de IA.
       sources: sources.length

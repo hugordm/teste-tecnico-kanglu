@@ -15,6 +15,11 @@ import {
   GENERATE_URLS_MESSAGES,
 } from "../../_components/loading-messages";
 import { IMAGE_MARKER, imageMarker } from "@/lib/body-images";
+import {
+  CATEGORIES,
+  normalizeCategory,
+  type CategorySlug,
+} from "@/lib/categories";
 
 // Estado editável do formulário — espelho local do artigo. Datas/slug/status
 // vêm do artigo mas nem tudo é editável aqui (slug é derivado do título pela
@@ -27,6 +32,7 @@ type FormState = {
   metaDescription: string;
   canonicalUrl: string;
   ogImage: string;
+  category: CategorySlug | ""; // "" = sem categoria
   workflowStatus: "draft" | "in_review"; // estados de workflow editáveis
   publishAt: string; // datetime-local ("YYYY-MM-DDTHH:mm"), vazio = sem agendamento
 };
@@ -107,6 +113,8 @@ export default function EditorPage() {
       metaDescription: a.metaDescription ?? "",
       canonicalUrl: a.canonicalUrl ?? "",
       ogImage: a.ogImage ?? "",
+      // normalizeCategory defende contra valor legado/desconhecido no banco.
+      category: normalizeCategory(a.category) ?? "",
       workflowStatus: a.status === "in_review" ? "in_review" : "draft",
       publishAt: isoToLocalInput(a.publishAt),
     });
@@ -157,6 +165,7 @@ export default function EditorPage() {
       metaDescription: toNull(form.metaDescription),
       canonicalUrl: toNull(form.canonicalUrl),
       ogImage: toNull(form.ogImage),
+      category: form.category || null, // "" → null (limpa a categoria)
       status: form.workflowStatus,
       publishAt: localInputToIso(form.publishAt),
       sources: cleanSources,
@@ -770,6 +779,27 @@ export default function EditorPage() {
                 onChange={(e) => set("excerpt", e.target.value)}
                 className={inputCls}
               />
+            </Field>
+            <Field label="Categoria" htmlFor="category">
+              <select
+                id="category"
+                value={form.category}
+                onChange={(e) =>
+                  set("category", e.target.value as CategorySlug | "")
+                }
+                className={inputCls}
+              >
+                <option value="">Sem categoria</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c.slug} value={c.slug}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-kanglu-bordo/50">
+                Sugerida pela IA na geração — confirme ou troque. Aparece como
+                selo no artigo e filtra a listagem do blog.
+              </p>
             </Field>
             <Field label="Conteúdo (Markdown)" htmlFor="content">
               <textarea

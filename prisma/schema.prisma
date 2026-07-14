@@ -22,6 +22,12 @@ model Article {
   content         String        // Markdown
   status          ArticleStatus @default(draft)
 
+  // Categoria (opcional) — slug de uma lista FIXA validada na app (lib/categories).
+  // String? em vez de enum: mantém a migration aditiva (só ADD COLUMN) e deixa a
+  // lista evoluir sem migration. Null = sem categoria (os artigos antigos seguem
+  // funcionando). Indexada porque o filtro público do /blog consulta por ela.
+  category        String?
+
   // SEO
   metaTitle       String?
   metaDescription String?
@@ -54,6 +60,7 @@ model Article {
   sources         Source[]
 
   @@index([status])   // painel admin filtra por status o tempo todo
+  @@index([category]) // filtro público do /blog consulta por categoria
 }
 
 model Source {

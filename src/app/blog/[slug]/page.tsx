@@ -11,6 +11,7 @@ import {
 } from "@/lib/public-articles";
 import { extractHeadings } from "@/lib/toc";
 import { SITE_URL } from "@/lib/site";
+import { categoryLabel } from "@/lib/categories";
 
 const dateFmt = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
@@ -97,6 +98,7 @@ export default async function ArticlePage({ params }: Props) {
   if (!article) notFound();
 
   const jsonLd = buildBlogPostingLd(article);
+  const catLabel = categoryLabel(article.category);
 
   // URL para compartilhar: a MESMA canônica do metadata/JSON-LD — canonicalUrl
   // explícita se houver, senão a URL pública de produção (base do site.ts).
@@ -138,7 +140,20 @@ export default async function ArticlePage({ params }: Props) {
             ← Voltar ao blog
           </Link>
 
-          <h1 className="mt-6 font-heading text-3xl font-bold leading-tight text-kanglu-bordo sm:text-4xl lg:text-5xl lg:leading-[1.1]">
+          {/* Selo de categoria (clicável → filtro do blog). Só se houver; nesse
+              caso o h1 aproxima (mt-3), senão mantém o respiro do "Voltar" (mt-6). */}
+          {catLabel && (
+            <Link
+              href={`/blog?categoria=${article.category}`}
+              className="mt-6 inline-block rounded-full bg-kanglu-orange/10 px-3 py-1 text-xs font-semibold text-kanglu-orange transition-colors hover:bg-kanglu-orange/20"
+            >
+              {catLabel}
+            </Link>
+          )}
+
+          <h1
+            className={`${catLabel ? "mt-3" : "mt-6"} font-heading text-3xl font-bold leading-tight text-kanglu-bordo sm:text-4xl lg:text-5xl lg:leading-[1.1]`}
+          >
             {article.title}
           </h1>
 

@@ -50,6 +50,11 @@ const draftSchema = z.object({
   metaTitle: z.string().trim().min(1),
   metaDescription: z.string().trim().min(1),
   suggestedSlug: z.string().trim().min(1),
+  // Sugestão de categoria: LOOSE de propósito (nullish) — o modelo pode devolver
+  // o slug, o rótulo, "null" ou omitir. Não deixamos isso quebrar a geração: a
+  // rota normaliza via normalizeCategory (lib/categories) contra a lista fixa,
+  // caindo em null se não casar. É só uma SUGESTÃO pré-selecionada no editor.
+  category: z.string().trim().nullish(),
 });
 
 export type GeneratedDraft = z.infer<typeof draftSchema>;
@@ -99,6 +104,10 @@ REGRAS DE ESCRITA:
 - NÃO use marcações de citação numeradas como [1], [2], [3] no texto. Escreva o conteúdo de forma fluida. As fontes serão listadas separadamente.
 - NÃO use notação LaTeX ou matemática (ex: \\text{}, \\times, \\div, \\frac, cifrões de fórmula ou colchetes de equação). Escreva fórmulas em texto simples e legível — ex: "Altura × Largura × Comprimento ÷ 6.000", usando os símbolos × e ÷ diretamente no texto.
 
+CATEGORIA (classificação):
+- Classifique o artigo em UMA destas categorias fixas, retornando exatamente o slug: "logistica" (entrega, frete, rastreamento, estoque, transporte), "e-commerce" (gestão da loja, vendas, conversão, marketplace), "atendimento" (pós-venda, suporte, relacionamento, fidelização) ou "tecnologia" (automação, sistemas, integrações, IA).
+- Escolha a MAIS adequada ao tema central. Se nenhuma se encaixar bem, use null. Não invente categorias fora dessa lista.
+
 FORMATO DE SAÍDA (obrigatório):
 Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cercas de código, com exatamente estas chaves:
 {
@@ -107,7 +116,8 @@ Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cerca
   "content": "corpo completo em markdown",
   "metaTitle": "título SEO (até ~60 caracteres)",
   "metaDescription": "descrição SEO (até ~155 caracteres)",
-  "suggestedSlug": "slug-amigavel-em-kebab-case"
+  "suggestedSlug": "slug-amigavel-em-kebab-case",
+  "category": "logistica | e-commerce | atendimento | tecnologia (ou null)"
 }`;
 
 /**

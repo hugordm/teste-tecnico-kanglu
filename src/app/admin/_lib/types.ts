@@ -25,6 +25,7 @@ export type AdminArticle = {
   metaTitle: string | null;
   metaDescription: string | null;
   canonicalUrl: string | null;
+  category: string | null; // slug de categoria (lib/categories); null = sem categoria
   ogImage: string | null;
   imageCredit: string | null;
   imageSourceUrl: string | null;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { CATEGORY_SLUGS } from "@/lib/categories";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,6 +94,9 @@ export const createArticleInput = z.object({
   aiAssisted: z.boolean().optional(),
   aiModel: z.string().trim().optional(),
 
+  // Categoria (opcional) — SÓ um slug da lista fixa; null/ausente = sem categoria.
+  category: z.enum(CATEGORY_SLUGS).nullable().optional(),
+
   // Agendamento: data/hora a partir da qual o artigo publicado aparece no blog.
   // Chega como ISO (UTC) do client; coerce.date() a converte em Date.
   publishAt: z.coerce.date().nullable().optional(),
@@ -123,6 +127,9 @@ export const updateArticleInput = z
 
     aiAssisted: z.boolean().optional(),
     aiModel: z.string().trim().nullable().optional(),
+
+    // Categoria (ver createArticleInput). null limpa; ausência mantém como está.
+    category: z.enum(CATEGORY_SLUGS).nullable().optional(),
 
     // Agendamento (ver createArticleInput). null limpa o agendamento (volta a
     // aparecer assim que publicado). Ausência do campo o mantém como está.
