@@ -163,7 +163,7 @@ function GenerateAutoForm() {
             <div className="grid gap-4 sm:grid-cols-2">
               <ModelSelect
                 label="Modelo de texto"
-                models={models.text}
+                models={models.textWeb}
                 value={effTextModel}
                 onChange={setTextModel}
                 disabled={loading}

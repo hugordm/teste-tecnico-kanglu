@@ -43,6 +43,37 @@ const MAX_TEXT_PER_PROVIDER = 2; // diversidade: os N mais recentes de cada prov
 const MAX_TEXT = 14;
 const MAX_IMAGE = 10;
 
+// ---------------------------------------------------------------------------
+// Curadoria por FLUXO no seletor de TEXTO.
+//
+// generate-auto (busca web): o modelo PRECISA acionar o plugin `web` da
+// OpenRouter (ou buscar nativamente, caso do Sonar) e devolver fontes reais.
+// Na prática, modelos "lite" (flash-lite, mini, nano, haiku) NÃO acionam bem o
+// plugin → voltam sem fontes → 422. Já os "grandes" (GPT-4/5, Claude Sonnet/
+// Opus, Gemini Pro, DeepSeek, etc.) e o Sonar (nativo) trazem fontes. Então a
+// lista do generate-auto exclui os lite POR CRITÉRIO DE ID (sem testar modelo,
+// economizando crédito da OpenRouter).
+//
+// generate (manual com URLs): NÃO há busca — o modelo só escreve a partir das
+// URLs dadas. Qualquer modelo de texto serve, inclusive os lite (que escrevem
+// bem). Por isso a lista `text` continua ampla.
+//
+// IMAGEM: não depende de busca — a lista de imagem é a mesma nos dois fluxos.
+// ---------------------------------------------------------------------------
+
+/**
+ * Marcadores de id que caracterizam um modelo "lite" — barato/pequeno, que não
+ * aciona bem a busca web. Excluídos SÓ da lista do generate-auto (textWeb).
+ * `flash-lite` já cai em `lite`. Ajuste aqui se surgir uma nova família lite.
+ */
+const LITE_ID_MARKERS = ["lite", "mini", "nano", "haiku"];
+
+/** true se o id parece um modelo "lite" (busca web fraca) — ver acima. */
+function isLiteModel(id: string): boolean {
+  const lower = id.toLowerCase();
+  return LITE_ID_MARKERS.some((marker) => lower.includes(marker));
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
@@ -53,7 +84,13 @@ export interface ModelInfo {
 }
 
 export interface CuratedModels {
+  /** Lista AMPLA de texto (inclui lite) — usada pelo generate manual com URLs. */
   text: ModelInfo[];
+  /**
+   * Lista CURADA de texto para o generate-auto (busca web): só modelos robustos
+   * (não-lite) + o Sonar nativo. Ver isLiteModel / bloco de curadoria por fluxo.
+   */
+  textWeb: ModelInfo[];
   image: ModelInfo[];
   /** Ids default (do env) para pré-selecionar em cada fluxo. */
   defaults: { text: string; textWeb: string; image: string };
@@ -117,10 +154,13 @@ function synthInfo(id: string): ModelInfo {
 }
 
 // Conjunto FIXO usado se a API de modelos falhar — os defaults atuais + alguns
-// conhecidos, pra o seletor nunca ficar vazio.
+// conhecidos, pra o seletor nunca ficar vazio. Mistura lite e robustos: a lista
+// ampla (text) usa tudo; a de busca (textWeb) filtra os lite fora.
 const FALLBACK_TEXT: ModelInfo[] = [
-  "google/gemini-3.1-flash-lite",
   "perplexity/sonar",
+  "openai/gpt-5",
+  "anthropic/claude-sonnet-4.5",
+  "google/gemini-3.1-flash-lite",
   "openai/gpt-5-mini",
   "anthropic/claude-haiku-4.5",
   "deepseek/deepseek-chat",
@@ -179,6 +219,17 @@ function curateText(raw: RawModel[]): ModelInfo[] {
 }
 
 /**
+ * Ordena a lista de busca web pondo os modelos NATIVOS (Sonar) na frente — é o
+ * default recomendado do generate-auto, então aparece no topo do seletor.
+ * Estável: preserva a ordem relativa dentro de cada grupo.
+ */
+function nativeWebFirst(list: ModelInfo[]): ModelInfo[] {
+  const native = list.filter((m) => isNativeWebSearchModel(m.id));
+  const rest = list.filter((m) => !isNativeWebSearchModel(m.id));
+  return [...native, ...rest];
+}
+
+/**
  * Lista curada de modelos (texto + imagem) + os defaults. Cacheada (6h) pelo
  * cache de fetch do Next; em falha, cai no conjunto FIXO.
  */
@@ -187,8 +238,15 @@ export async function getCuratedModels(): Promise<CuratedModels> {
   const raw = await fetchRawModels();
 
   if (!raw) {
+    // textWeb do fallback: mesma lista fixa SEM os lite + garante o Sonar.
+    const fallbackWeb = ensureIds(
+      nativeWebFirst(FALLBACK_TEXT.filter((m) => !isLiteModel(m.id))),
+      [defaults.textWeb],
+      new Map(),
+    );
     return {
       text: ensureIds([...FALLBACK_TEXT], [defaults.text, defaults.textWeb], new Map()),
+      textWeb: fallbackWeb,
       image: ensureIds([...FALLBACK_IMAGE], [defaults.image], new Map()),
       defaults,
     };
@@ -209,6 +267,17 @@ export async function getCuratedModels(): Promise<CuratedModels> {
   );
   const text = ensureIds(curateText(textRaw), [defaults.text, defaults.textWeb], byId);
 
+  // TEXTO (busca web / generate-auto): mesma base, mas SEM os lite — filtrados
+  // ANTES do curateText pra não sumir com um provedor inteiro caso seus 2 mais
+  // recentes sejam lite. Sonar (nativo) no topo; só o default textWeb é forçado
+  // (nunca o default lite de texto). Ver bloco de curadoria por fluxo no topo.
+  const textWebRaw = textRaw.filter((m) => !isLiteModel(m.id));
+  const textWeb = ensureIds(
+    nativeWebFirst(curateText(textWebRaw)),
+    [defaults.textWeb],
+    byId,
+  );
+
   // IMAGEM: qualquer modelo que gera imagem (são poucos), mais recentes primeiro.
   const imageRaw = raw
     .filter((m) => notVariant(m) && outputs(m).includes("image"))
@@ -216,7 +285,7 @@ export async function getCuratedModels(): Promise<CuratedModels> {
     .slice(0, MAX_IMAGE);
   const image = ensureIds(imageRaw.map(toInfo), [defaults.image], byId);
 
-  return { text, image, defaults };
+  return { text, textWeb, image, defaults };
 }
 
 /**
@@ -227,11 +296,13 @@ export async function getCuratedModels(): Promise<CuratedModels> {
  */
 export async function validateModelId(
   id: string | undefined,
-  kind: "text" | "image",
+  kind: "text" | "textWeb" | "image",
 ): Promise<string | undefined> {
   if (!id) return undefined;
   const curated = await getCuratedModels();
-  const list = kind === "text" ? curated.text : curated.image;
+  // "textWeb" valida contra a lista curada de busca (só robustos + Sonar): um
+  // lite escolhido à mão no generate-auto é rejeitado aqui → cai no default.
+  const list = curated[kind];
   return list.some((m) => m.id === id) ? id : undefined;
 }
 

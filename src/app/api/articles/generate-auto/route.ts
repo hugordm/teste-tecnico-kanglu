@@ -3,7 +3,7 @@ import { getAuth } from "@/lib/auth";
 import { generateUniqueSlug } from "@/lib/validation";
 import { generateDraftWithWebSearch, AiError } from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
-import { validateModelId } from "@/lib/models";
+import { validateModelId, isNativeWebSearchModel } from "@/lib/models";
 import { z } from "zod";
 
 // O upload da imagem automática usa o SDK do Node (Buffer) via Vercel Blob,
@@ -60,7 +60,10 @@ export async function POST(req: Request) {
 
   // Valida os modelos escolhidos contra a lista curada (allowlist); inválido/
   // ausente vira undefined → cai no default (Sonar p/ texto, env p/ imagem).
-  const textModel = await validateModelId(parsed.data.textModel, "text");
+  // Texto valida contra a lista de BUSCA (textWeb: só robustos + Sonar) — um
+  // lite forçado no payload é rejeitado aqui e cai no Sonar. Imagem é a lista
+  // completa (não depende de busca).
+  const textModel = await validateModelId(parsed.data.textModel, "textWeb");
   const imageModel = await validateModelId(parsed.data.imageModel, "image");
 
   // Busca + geração num só passo. Isolada no try pra virar 502 amigável em vez
@@ -87,18 +90,18 @@ export async function POST(req: Request) {
   const { draft, model, sources } = result;
 
   // Nenhuma fonte real e não-concorrente sobrou → NÃO cria o artigo. Melhor um
-  // 422 honesto do que um rascunho sem lastro factual.
+  // 422 honesto do que um rascunho sem lastro factual. A mensagem depende de
+  // QUEM buscou: modelo não-nativo que não trouxe fonte provavelmente não
+  // acionou bem o plugin `web` (típico dos lite) → orienta trocar por Sonar/
+  // robusto. Sonar (nativo) sem fontes = realmente não achou não-concorrentes.
   if (sources.length === 0) {
     console.warn(
-      `[generate-auto] nenhuma fonte válida para o tema "${theme}"`,
+      `[generate-auto] nenhuma fonte válida para o tema "${theme}" (modelo: ${model})`,
     );
-    return Response.json(
-      {
-        error:
-          "Não foram encontradas fontes adequadas (não-concorrentes) para este tema. Use a geração manual com URLs.",
-      },
-      { status: 422 },
-    );
+    const error = isNativeWebSearchModel(model)
+      ? "Não foram encontradas fontes adequadas (não-concorrentes) para este tema. Use a geração manual com URLs."
+      : "Este modelo não trouxe fontes para a busca web. Use o Sonar (recomendado) ou um modelo mais robusto, ou faça a geração manual com URLs.";
+    return Response.json({ error }, { status: 422 });
   }
 
   const slug = await generateUniqueSlug(draft.suggestedSlug || draft.title);
