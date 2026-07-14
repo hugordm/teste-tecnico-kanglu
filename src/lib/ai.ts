@@ -105,7 +105,7 @@ REGRAS DE ESCRITA:
 - NÃO use notação LaTeX ou matemática (ex: \\text{}, \\times, \\div, \\frac, cifrões de fórmula ou colchetes de equação). Escreva fórmulas em texto simples e legível — ex: "Altura × Largura × Comprimento ÷ 6.000", usando os símbolos × e ÷ diretamente no texto.
 
 CATEGORIA (classificação):
-- Classifique o artigo em UMA destas categorias fixas, retornando exatamente o slug: "logistica" (entrega, frete, rastreamento, estoque, transporte), "e-commerce" (gestão da loja, vendas, conversão, marketplace), "atendimento" (pós-venda, suporte, relacionamento, fidelização) ou "tecnologia" (automação, sistemas, integrações, IA).
+- Classifique o artigo em UMA destas categorias fixas, retornando exatamente o slug: "logistica" (estoque, armazenagem, rastreamento, transporte, entregas, prazos, frete), "atendimento" (pós-venda, suporte, relacionamento, fidelização, SAC), "marketing" (aquisição, tráfego, conteúdo, redes sociais, SEO, branding), "gestao" (processos, finanças, operação, indicadores, planejamento), "tecnologia" (automação, sistemas, integrações, plataformas, IA) ou "vendas" (funil, conversão, negociação, ticket médio, recompra, checkout).
 - Escolha a MAIS adequada ao tema central. Se nenhuma se encaixar bem, use null. Não invente categorias fora dessa lista.
 
 FORMATO DE SAÍDA (obrigatório):
@@ -117,7 +117,7 @@ Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cerca
   "metaTitle": "título SEO (até ~60 caracteres)",
   "metaDescription": "descrição SEO (até ~155 caracteres)",
   "suggestedSlug": "slug-amigavel-em-kebab-case",
-  "category": "logistica | e-commerce | atendimento | tecnologia (ou null)"
+  "category": "logistica | atendimento | marketing | gestao | tecnologia | vendas (ou null)"
 }`;
 
 /**

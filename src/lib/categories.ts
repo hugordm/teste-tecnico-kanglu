@@ -18,9 +18,11 @@
 
 export const CATEGORIES = [
   { slug: "logistica", label: "Logística" },
-  { slug: "e-commerce", label: "E-commerce" },
   { slug: "atendimento", label: "Atendimento" },
+  { slug: "marketing", label: "Marketing" },
+  { slug: "gestao", label: "Gestão" },
   { slug: "tecnologia", label: "Tecnologia" },
+  { slug: "vendas", label: "Vendas" },
 ] as const;
 
 export type CategorySlug = (typeof CATEGORIES)[number]["slug"];

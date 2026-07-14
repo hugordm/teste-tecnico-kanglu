@@ -47,12 +47,14 @@ npm install
 
 cp .env.example .env      # preencha os valores (ver tabela abaixo)
 
-npx prisma migrate dev    # aplica o schema no banco
+npx prisma migrate dev    # aplica TODAS as migrations no banco
 npm run seed              # popula os 3 artigos de exemplo (capa + imagens no corpo)
 npm run dev               # http://localhost:3000
 ```
 
 O projeto sobe em poucos minutos. A geração por IA, as imagens e o chatbot são opcionais para rodar — a criação manual de artigos funciona sem elas. O build de produção usa `prisma generate && next build` (garante o Prisma Client atualizado na Vercel mesmo em mudanças só de schema).
+
+**Migrations:** o histórico vive em `prisma/migrations/`. Todas são aditivas. A mais recente, `add_category`, adiciona a coluna opcional `category` (nullable) ao `Article` — os artigos existentes seguem funcionando sem categoria. Em produção, aplique com `npx prisma migrate deploy`. Para atribuir categorias aos 3 artigos já existentes **sem recriar** nada (ao contrário do seed, que faz `deleteMany`), há um script idempotente e não-destrutivo: `npx tsx prisma/assign-categories.ts`.
 
 ### Variáveis de ambiente
 
@@ -63,14 +65,15 @@ O projeto sobe em poucos minutos. A geração por IA, as imagens e o chatbot sã
 | `ADMIN_EMAIL` | E-mail de login do admin |
 | `ADMIN_PASSWORD` | Senha de login do admin |
 | `OPENROUTER_API_KEY` | Chave da OpenRouter (texto, imagem e chat) |
-| `OPENROUTER_MODEL` | Modelo de geração com fontes (padrão: `google/gemini-3.1-flash-lite`) |
-| `WEB_SEARCH_MODEL` | Modelo de busca web por tema (padrão: `perplexity/sonar`) |
-| `OPENROUTER_IMAGE_MODEL` | Modelo de imagem (padrão: `google/gemini-3.1-flash-lite-image`) |
+| `OPENROUTER_MODEL` | **Default** do modelo de geração com fontes (padrão: `google/gemini-3.1-flash-lite`) |
+| `WEB_SEARCH_MODEL` | **Default** do modelo de busca web por tema (padrão: `perplexity/sonar`) |
+| `OPENROUTER_IMAGE_MODEL` | **Default** do modelo de imagem (padrão: `google/gemini-3.1-flash-lite-image`) |
 | `OPENROUTER_CHAT_MODEL` | Modelo do assistente do blog (padrão: `google/gemini-3.1-flash-lite`) |
+| `OPENROUTER_IDEAS_MODEL` | Modelo da sugestão de pautas (padrão: `google/gemini-3.1-flash-lite`) |
 | `BLOB_READ_WRITE_TOKEN` | Token do Vercel Blob (upload das imagens) |
 | `NEXT_PUBLIC_SITE_URL` | URL pública do site (OG, canonical e sitemap absolutos) |
 
-Os modelos têm valores padrão no código; só é preciso defini-los para sobrescrever.
+Os modelos têm valores padrão no código; só é preciso defini-los para sobrescrever. As três variáveis marcadas como **default** definem apenas a opção **pré-selecionada** de cada fluxo — na tela de geração há um **seletor de modelo** (texto + imagem) que lista modelos curados da OpenRouter em runtime e permite escolher outro (ver *Seletor de modelo* abaixo).
 
 ---
 
@@ -83,6 +86,19 @@ Os modelos têm valores padrão no código; só é preciso defini-los para sobre
 **2. Busca automática por tema** — `/admin/generate-auto`. O usuário fornece apenas o tema. O Perplexity Sonar (que sempre pesquisa a web) encontra fontes reais, o sistema filtra concorrentes automaticamente e gera o rascunho ancorado nas fontes encontradas.
 
 Em ambos, o rascunho nasce como assistido por IA e é **revisado pelo autor** antes de publicar. Também há criação totalmente manual.
+
+### Seletor de modelo (texto + imagem)
+
+Cada tela de geração tem um seletor com a **logo do provedor** + nome do modelo, alimentado por uma **lista curada da OpenRouter** buscada em runtime (`GET /api/models`, cacheada 6h; provedores conhecidos, logos self-hosted em `public/providers/`). A curadoria é **por fluxo**:
+
+- **Busca por tema** (`generate-auto`): só modelos **robustos + o Sonar**. Modelos "lite" (que contêm `lite`/`mini`/`nano`/`haiku` no id) são filtrados fora, porque na prática não acionam bem o plugin de busca web da OpenRouter e voltam sem fontes. O Sonar busca nativamente; qualquer outro modelo recebe o plugin `web` para trazer as fontes no mesmo formato.
+- **Geração com URLs** (`generate`): aceita a lista **ampla** (inclusive lite), já que não há busca — o modelo só escreve a partir das URLs.
+
+A imagem tem sua própria lista (não depende de busca), com o Nano Banana 2 como padrão. Toda escolha é **validada contra a allowlist** curada no servidor: um id arbitrário é descartado e cai no default do ambiente. Se a API de modelos falhar, um **fallback** fixo mantém o seletor utilizável.
+
+### Sugestão de pautas
+
+Em `/admin/ideas`, a IA sugere ~5 **títulos** de artigos no nicho da Kanglu (opcionalmente focados num tema informado). As pautas são efêmeras (não gravam nada); a escolhida abre já no gerador por tema. Endpoint: `POST /api/ideas`.
 
 ### Regenerar rascunho
 
@@ -100,9 +116,37 @@ Um artigo pode ser agendado para aparecer no blog em uma data/hora futura (`publ
 
 Uma bolinha flutuante nas páginas do blog abre um chat que responde dúvidas sobre os **artigos publicados**. O contexto é montado dinamicamente a partir do banco (reflete adições/remoções de artigos sem alterar código), com orçamento de tokens. O escopo é limitado: perguntas fora dos temas do blog recebem uma recusa educada. Respostas em texto simples, sem markdown.
 
+### Categorias e filtro
+
+Cada artigo pode ter uma **categoria** (opcional) de uma **lista fixa** — Logística, Atendimento, Marketing, Gestão, Tecnologia, Vendas — validada na aplicação (a coluna é um `String?` simples, sem enum no banco, para a lista evoluir sem migration). A categoria é **sugerida pela IA na própria geração** (vem no mesmo JSON do rascunho, sem chamada extra) e fica pré-selecionada num dropdown no editor para o autor confirmar ou trocar. No blog, ela aparece como **selo clicável** (no artigo e no card) e a listagem ganha uma linha de **chips de filtro** (`/blog?categoria=<slug>`) que mostram só as categorias **com conteúdo publicado**. O filtro **coexiste** com a busca e a paginação via query params.
+
+### Busca no blog
+
+A listagem tem busca por texto (`/blog?q=<termo>`), feita no servidor (SSR). A comparação usa *folding* de acentos e caixa (NFD), então "logistica" casa com "Logística". As páginas de busca recebem `noindex` (resultado fino/duplicado); a listagem base e as de categoria seguem indexáveis.
+
+### Índice do artigo (TOC)
+
+Artigos com 2+ seções ganham um **índice navegável**: no topo em mobile/tablet e numa coluna lateral *sticky* no desktop. As âncoras usam scroll suave (CSS puro) e os dois índices apontam para os mesmos ids do corpo.
+
+### Tempo de leitura
+
+O cabeçalho do artigo mostra o tempo estimado de leitura (200 palavras/min, mínimo de 1). A contagem ignora marcadores de imagem, URLs e a sintaxe de markdown — conta só as palavras reais.
+
+### Compartilhar
+
+No fim do artigo, uma linha discreta "Compartilhar:" com botões para WhatsApp, LinkedIn, X/Twitter, Facebook, e-mail e **copiar link** (com feedback "Copiado!"). Ícones monocromáticos na identidade Kanglu (não nas cores das redes). A URL compartilhada é sempre a **canônica absoluta** de produção. Só aparece no artigo público (nunca na prévia do editor, para não copiar URL de rascunho).
+
+### Home
+
+A página inicial é uma landing: **hero** com a proposta e CTA para o blog, seção de **recursos** (as features reais da plataforma) e os **últimos artigos publicados** (puxados do banco, revalidados). Sem números fabricados — só o que existe de verdade.
+
+### Responsividade
+
+Toda a interface (blog e painel) é responsiva — mobile (~375px), tablet (~768px) e desktop (~1280px+): grids que reflowam (1/2/3 colunas), o índice lateral que vira topo, chips e botões que quebram sem vazar, e o editor/kanban adaptados ao toque.
+
 ### Regras de conteúdo (no prompt + limpeza determinística)
 
-O system prompt proíbe inventar dados/números, citar concorrentes da Kanglu, usar notação LaTeX, e citar pesquisas/institutos de terceiros ausentes das fontes. Como modelos de linguagem são probabilísticos, há também limpeza determinística (remoção de marcações de citação numeradas e de markdown residual no chat) e, principalmente, revisão humana antes de publicar.
+O system prompt proíbe inventar dados/números, citar concorrentes da Kanglu, usar notação LaTeX, e citar pesquisas/institutos de terceiros ausentes das fontes. Como modelos de linguagem são probabilísticos, há também **limpeza determinística** da saída, robusta a diferentes modelos (o seletor permite trocar de provedor): remoção de marcações de citação numeradas e de markdown residual no chat, remoção de tags `<cite>…</cite>` (que alguns modelos, como o Claude via plugin web, injetam) preservando o texto interno, e **extração tolerante de JSON** (aceita cercas de código ```` ```json ````, preâmbulo/posfácio e chaves balanceadas) antes da validação de shape com zod. E, principalmente, revisão humana antes de publicar.
 
 ---
 
@@ -114,7 +158,7 @@ As rotas de API vivem em `src/app/api/**/route.ts` e rodam no runtime Node do Ne
 
 ### Um modelo por tarefa
 
-Gemini para gerar a partir de fontes fornecidas (rápido, econômico); Perplexity Sonar para a busca automática, por ser um modelo de busca dedicado que ancora fontes de forma confiável (o Gemini com grounding buscava de forma intermitente); Nano Banana 2 para imagens; Gemini flash-lite para o chat. Todos via OpenRouter, com uma única chave.
+Gemini para gerar a partir de fontes fornecidas (rápido, econômico); Perplexity Sonar para a busca automática, por ser um modelo de busca dedicado que ancora fontes de forma confiável (o Gemini com grounding buscava de forma intermitente); Nano Banana 2 para imagens; Gemini flash-lite para o chat. Todos via OpenRouter, com uma única chave. Esses são os **defaults** — na geração, o seletor de modelo permite escolher outro (curado por fluxo, ver *Seletor de modelo*).
 
 ### O "portão" de publicação
 
@@ -150,13 +194,17 @@ Admin com credenciais em variáveis de ambiente e JWT em cookie `httpOnly`. Rota
 
 ```
 prisma/
-  schema.prisma            # Article + Source + enum de estados
+  schema.prisma            # Article (+ category) + Source + enum de estados
+  migrations/              # histórico aditivo (inclui add_category)
   seed.ts                  # 3 artigos de exemplo (capa + imagens no corpo), idempotente
+  assign-categories.ts     # atribui categoria aos artigos por slug (não-destrutivo)
 src/
   app/
     api/
       auth/login/                    # login → JWT
       chat/route.ts                  # assistente do blog (público)
+      ideas/route.ts                 # sugestão de pautas (IA)
+      models/route.ts                # lista curada de modelos (seletor)
       articles/
         route.ts                     # GET (lista) + POST (cria draft)
         [id]/route.ts                # GET / PATCH / DELETE
@@ -165,17 +213,23 @@ src/
         [id]/generate-image/route.ts # gera 4 imagens → Vercel Blob
         generate/route.ts            # geração com URLs (Gemini)
         generate-auto/route.ts       # busca automática por tema (Sonar)
-    admin/                           # login, painel, editor, geradores
+    admin/                           # login, painel, editor, geradores, pautas
     blog/
       layout.tsx                     # injeta o chatbot em /blog/*
-      page.tsx, [slug]/page.tsx      # listagem e artigo
+      page.tsx, [slug]/page.tsx      # listagem (busca + categoria) e artigo
+    page.tsx                         # home (hero + recursos + últimos artigos)
     sitemap.ts, robots.ts            # SEO
   components/
     article-markdown.tsx             # renderer (inclui imagens no corpo)
+    article-body.tsx                 # capa + corpo + tempo de leitura (compartilhado)
+    table-of-contents.tsx            # índice do artigo (topo/lateral)
+    share-buttons.tsx                # botões de compartilhar (client)
+    cover-image.tsx                  # capa + crédito do modelo
     blog-chat.tsx                    # widget flutuante do chatbot
   lib/
     prisma, auth, validation, extract, ai, image, article-image,
-    body-images, web-sources, competitors, chat, public-articles, site
+    body-images, web-sources, competitors, chat, public-articles, site,
+    categories, models, ideas, reading-time, json-extract, toc
   proxy.ts                           # proteção das rotas /admin
 API.md                               # documentação das rotas
 ```
@@ -192,7 +246,7 @@ API.md                               # documentação das rotas
 
 **Obrigatório — completo:** CRUD com estados, autenticação, geração por IA, validação de fontes (portão 422), painel admin, blog público semântico com fontes, regras de conteúdo, SEO (slug, meta tags, sitemap, JSON-LD), identidade Kanglu, 3 artigos com fontes reais e deploy.
 
-**Diferenciais implementados:** SSR/SSG na área pública, robots + sitemap dinâmico, JSON-LD, extração de metadados de URLs, agendamento de publicação, URL canônica automática, busca automática de fontes por tema (Sonar) com filtro de concorrentes, regeneração de rascunho, geração de imagem por IA (4 opções + imagens no corpo) hospedada no Vercel Blob, e um assistente de IA no blog com contexto dinâmico dos artigos.
+**Diferenciais implementados:** SSR/SSG na área pública, robots + sitemap dinâmico, JSON-LD, extração de metadados de URLs, agendamento de publicação, URL canônica automática, busca automática de fontes por tema (Sonar) com filtro de concorrentes, regeneração de rascunho, geração de imagem por IA (4 opções + imagens no corpo) hospedada no Vercel Blob, assistente de IA no blog com contexto dinâmico dos artigos, seletor de modelo curado por fluxo (texto + imagem), sugestão de pautas por IA, categorias com filtro no blog e sugestão automática na geração, busca com folding de acentos, índice do artigo (TOC), tempo de leitura, botões de compartilhar, home com hero/recursos/últimos artigos, layout responsivo (mobile/tablet/desktop) e limpeza robusta da saída dos modelos (extração tolerante de JSON, remoção de tags `<cite>`).
 
 **Com mais tempo:** testes automatizados (unitários no portão + e2e do fluxo), CI no GitHub Actions, histórico de versões do rascunho, persistência do texto extraído das fontes (hoje o regenerar re-baixa as URLs), rate-limiting no endpoint público do chat, e RAG (busca semântica) no chatbot caso o volume de artigos cresça.
 

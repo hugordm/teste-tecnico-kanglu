@@ -35,14 +35,14 @@ Lista todos os artigos. Query opcional `status`.
 **Respostas:** `200` (array com sources) · `400` status inválido · `401`.
 
 ### `POST /api/articles`
-Cria um artigo manualmente. Nasce como `draft`.
+Cria um artigo manualmente. Nasce como `draft`. Aceita opcionalmente `category` (um slug da lista fixa: `logistica`, `atendimento`, `marketing`, `gestao`, `tecnologia`, `vendas`); qualquer outro valor é rejeitado pelo schema.
 **Respostas:** `201` · `400` · `401`.
 
 ### `GET /api/articles/[id]`
 Retorna um artigo com suas fontes. `200` · `404` · `401`.
 
 ### `PATCH /api/articles/[id]`
-Edita um artigo. Aceita `draft`, `in_review`, `archived` — **não** aceita `published`. As fontes, se enviadas, substituem o conjunto atual. Aceita `publishAt` (agendamento) e a seleção de imagem de capa; ao salvar, as imagens não usadas (nem capa, nem referenciadas no conteúdo) são removidas do Blob.
+Edita um artigo. Aceita `draft`, `in_review`, `archived` — **não** aceita `published`. As fontes, se enviadas, substituem o conjunto atual. Aceita `publishAt` (agendamento), `category` (slug da lista fixa, ou `null` para limpar) e a seleção de imagem de capa; ao salvar, as imagens não usadas (nem capa, nem referenciadas no conteúdo) são removidas do Blob.
 **Respostas:** `200` · `400` (inclui tentativa de setar `published`) · `404` · `401`.
 
 ### `DELETE /api/articles/[id]`
@@ -61,18 +61,33 @@ Regenera o conteúdo do rascunho a partir das mesmas fontes. Sobrescreve `conten
 ## Geração assistida por IA
 
 ### `POST /api/articles/generate`
-Geração **com fontes fornecidas** (tema + palavras-chave + URLs). Extrai o texto (Readability + linkedom) e gera com o Gemini. Ao final, gera 4 opções de imagem de capa.
-**Corpo:** `{ "theme": "...", "keywords": ["..."], "urls": ["https://..."] }`
-**Respostas:** `201` (draft com fontes e opções de imagem) · `400` · `401` · `502`.
+Geração **com fontes fornecidas** (tema + palavras-chave + URLs). Extrai o texto (Readability + linkedom) e gera com o Gemini. Ao final, gera 4 opções de imagem de capa. O modelo sugere uma `category` no mesmo JSON (normalizada contra a lista fixa), gravada no rascunho.
+**Corpo:** `{ "theme": "...", "keywords": ["..."], "urls": ["https://..."], "textModel": "...", "imageModel": "..." }`
+`textModel`/`imageModel` são **opcionais** e validados contra a lista curada (`GET /api/models`); um id inválido/ausente cai no default do ambiente.
+**Respostas:** `201` (draft com fontes, categoria sugerida e opções de imagem) · `400` · `401` · `502`.
 
 ### `POST /api/articles/generate-auto`
-Geração por **busca automática** (apenas o tema). O Perplexity Sonar pesquisa a web; as URLs são filtradas contra concorrentes; o rascunho é ancorado nas fontes válidas. Também gera 4 opções de imagem.
-**Corpo:** `{ "theme": "...", "keywords": ["..."] }`
-**Respostas:** `201` · `422` se nenhuma fonte não-concorrente for encontrada · `400` · `401` · `502`.
+Geração por **busca automática** (apenas o tema). O modelo de busca pesquisa a web; as URLs são filtradas contra concorrentes; o rascunho é ancorado nas fontes válidas. Também sugere `category` e gera 4 opções de imagem.
+**Corpo:** `{ "theme": "...", "keywords": ["..."], "textModel": "...", "imageModel": "..." }`
+`textModel` é validado contra a lista curada **de busca** (só modelos robustos + Sonar); um "lite" é descartado e cai no Sonar. O Sonar busca nativamente; outro modelo recebe o plugin `web` da OpenRouter.
+**Respostas:** `201` · `422` se nenhuma fonte válida for encontrada (a mensagem orienta usar o Sonar/um modelo mais robusto quando o modelo escolhido não trouxe fontes) · `400` · `401` · `502`.
 
 ### `POST /api/articles/[id]/generate-image`
-Gera **4 novas opções** de imagem (Nano Banana 2) em paralelo, faz upload no Vercel Blob e as associa ao artigo (a 1ª vira capa). Descarta do Blob as opções anteriores não usadas.
+Gera **4 novas opções** de imagem (Nano Banana 2) em paralelo, faz upload no Vercel Blob e as associa ao artigo (a 1ª vira capa). Descarta do Blob as opções anteriores não usadas. Aceita opcionalmente `imageModel` (validado contra a lista curada de imagem).
 **Respostas:** `200` (artigo com novas opções) · `404` · `401` · `502` (sem corromper o artigo).
+
+### `GET /api/models`
+Lista **curada** de modelos da OpenRouter para os seletores de geração (cacheada 6h; fallback fixo se a API falhar). Só admin autenticado.
+**Resposta:** `200` `{ "text": [...], "textWeb": [...], "image": [...], "defaults": { "text": "...", "textWeb": "...", "image": "..." } }` — cada modelo traz `{ id, name, provider, providerLabel, logo }`. `text` é a lista ampla (fluxo com URLs); `textWeb` é a lista curada de busca (só robustos + Sonar); `image` é a lista de imagem. `401` sem autenticação.
+
+---
+
+## Sugestão de pautas (admin)
+
+### `POST /api/ideas`
+Sugere ~5 **títulos** de artigos no nicho da Kanglu, opcionalmente focados num tema. Não cria nada — as pautas são efêmeras no cliente.
+**Corpo:** `{ "theme": "..." }` (`theme` opcional, vazio → pautas gerais).
+**Respostas:** `200` `{ "ideas": ["...", "..."] }` · `400` · `401` · `502` (falha da IA, com fallback amigável).
 
 ---
 
@@ -89,11 +104,19 @@ Público (sem auth). Recebe o histórico da conversa e responde dúvidas sobre o
 
 Servem apenas artigos `published` e visíveis (respeitando o agendamento `publishAt`).
 
+### `GET /`
+Home (landing): hero, seção de recursos e os **3 últimos artigos publicados** (lidos do banco, revalidados). SSR/ISR.
+
 ### `GET /blog`
-Listagem paginada dos artigos publicados (SSR). Query `?page=`. Inclui o chatbot flutuante.
+Listagem paginada dos artigos publicados (SSR). Query params, que **coexistem**:
+- `?page=<n>` — paginação.
+- `?q=<termo>` — busca por título/excerpt, com *folding* de acentos e caixa. Páginas de busca recebem `noindex` e canônica na listagem base.
+- `?categoria=<slug>` — filtro por categoria (slug da lista fixa; valor inválido é ignorado). Indexável, com canônica própria em `?categoria=`. Os chips de filtro mostram só categorias com conteúdo publicado.
+
+Inclui o chatbot flutuante.
 
 ### `GET /blog/[slug]`
-Página do artigo: HTML semântico, SEO (meta, canonical, JSON-LD), imagem de capa com crédito, imagens no corpo (marcadores renderizados), seção "Fontes e referências", e o chatbot. Slug de rascunho, agendado ainda invisível, ou inexistente → 404.
+Página do artigo: HTML semântico, SEO (meta, canonical, JSON-LD), selo de **categoria** (clicável → filtro), **tempo de leitura**, **índice (TOC)** para artigos com 2+ seções, imagem de capa com crédito, imagens no corpo (marcadores renderizados), seção "Fontes e referências", **botões de compartilhar**, e o chatbot. Slug de rascunho, agendado ainda invisível, ou inexistente → 404.
 
 ---
 
