@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { ArticleBody } from "@/components/article-body";
 import { TableOfContents } from "@/components/table-of-contents";
 import { SiteHeader } from "@/components/site-header";
+import { ShareButtons } from "@/components/share-buttons";
 import {
   getPublishedArticleBySlug,
   type PublicArticle,
@@ -97,6 +98,11 @@ export default async function ArticlePage({ params }: Props) {
 
   const jsonLd = buildBlogPostingLd(article);
 
+  // URL para compartilhar: a MESMA canônica do metadata/JSON-LD — canonicalUrl
+  // explícita se houver, senão a URL pública de produção (base do site.ts).
+  // Absoluta de propósito: o share tem que apontar pro artigo real, não localhost.
+  const shareUrl = article.canonicalUrl ?? `${SITE_URL}/blog/${article.slug}`;
+
   // Mesma extração pura usada pelo índice inline do ArticleBody — aqui alimenta o
   // índice LATERAL (sticky) do desktop. Os ids das âncoras continuam sendo postos
   // no corpo pelo ArticleMarkdown, então os dois índices (topo no mobile/tablet,
@@ -156,6 +162,11 @@ export default async function ArticlePage({ params }: Props) {
           />
 
           <SourcesSection sources={article.sources} />
+
+          {/* Compartilhar — fim do artigo, depois das fontes. Só na página
+              pública (não no ArticleBody), então nunca aparece na prévia do
+              editor copiando URL de rascunho. */}
+          <ShareButtons url={shareUrl} title={article.title} />
         </article>
 
         {/* Índice LATERAL — só no desktop (lg+) e só com 2+ seções. Coluna com
