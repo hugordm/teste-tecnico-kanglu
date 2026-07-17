@@ -17,7 +17,7 @@
 //
 // A chave vem SÓ do ambiente (FIRECRAWL_API_KEY, fc-...), nunca hardcoded.
 
-import { recencyTbs } from "@/lib/recency";
+import { FIRECRAWL_RECENCY_TBS } from "@/lib/recency";
 
 /** Endpoint da busca v2 do Firecrawl. */
 const FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search";
@@ -117,9 +117,10 @@ export async function firecrawlSearch(
         // Só busca web (sem imagens/news); com scrape do conteúdo em markdown.
         sources: [{ type: "web" }],
         scrapeOptions: { formats: [{ type: "markdown" }] },
-        // Recência opcional: restringe aos últimos meses (conteúdo ATUAL do cron).
+        // Recência opcional: PREFERÊNCIA por recente (sort-by-date, último ano),
+        // não janela dura — não cega a busca pro evergreen bom (ver lib/recency).
         // Omitido no fluxo do painel — lá o editor pode querer um tema atemporal.
-        ...(opts.recent ? { tbs: recencyTbs() } : {}),
+        ...(opts.recent ? { tbs: FIRECRAWL_RECENCY_TBS } : {}),
       }),
     });
   } catch (err) {

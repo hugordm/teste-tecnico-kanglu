@@ -11,6 +11,7 @@ import {
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
 import { validateModelId } from "@/lib/models";
 import { normalizeCategory } from "@/lib/categories";
+import { hasNicheSignal } from "@/lib/relevance";
 import type { ArticleWithSources } from "@/lib/publish";
 
 // ---------------------------------------------------------------------------
@@ -66,13 +67,21 @@ export interface GenerateAutoParams {
 }
 
 /**
+ * Problema de QUALIDADE detectado após gerar:
+ *   - too_short → abaixo do piso de extensão (parágrafo/snippet).
+ *   - off_topic → nenhuma fonte tem sinal do nicho (título+URL) — a busca trouxe
+ *     material fora do tema (poliéster, portos…). O portão de fonte não pega isso.
+ */
+export type QualityIssue = "too_short" | "off_topic";
+
+/**
  * Resultado discriminado da geração:
- *   - ok                → artigo criado (draft). `tooShort` diz se ficou abaixo do
- *     piso mesmo após o retry (só acontece com shortPolicy "keepDraft"); o chamador
- *     usa isso para não publicar. `engine`/`sourceCount`/`length` = instrumentação.
+ *   - ok                → artigo criado (draft). `qualityIssue` diz se algo ficou
+ *     ruim mesmo assim (só com shortPolicy "keepDraft", o cron): o chamador usa
+ *     para NÃO publicar. `engine`/`sourceCount`/`length` = instrumentação.
  *   - generation_failed → busca/geração da IA falhou (AiError). Nada criado. (502)
  *   - no_sources        → após filtrar, sobraram ZERO fontes. Nada criado. (422)
- *   - too_short         → rascunho abaixo do piso e shortPolicy "reject". Nada
+ *   - too_short/off_topic → problema de qualidade com shortPolicy "reject". Nada
  *     criado. (422) Carrega `length` para a mensagem.
  */
 export type GenerateAutoOutcome =
@@ -81,12 +90,12 @@ export type GenerateAutoOutcome =
       article: ArticleWithSources;
       engine: SearchEngineUsed;
       sourceCount: number;
-      tooShort: boolean;
+      qualityIssue: QualityIssue | null;
       length: ArticleLength;
     }
   | { ok: false; reason: "generation_failed" }
   | { ok: false; reason: "no_sources"; model: string }
-  | { ok: false; reason: "too_short"; length: ArticleLength; model: string };
+  | { ok: false; reason: QualityIssue; length: ArticleLength; model: string };
 
 /**
  * Gera um rascunho a partir SÓ do tema: o motor escolhido busca fontes reais na
@@ -175,24 +184,35 @@ export async function generateAutoArticle(
     return { ok: false, reason: "no_sources", model };
   }
 
-  // Piso de extensão. Os geradores já re-escreveram 1× se `retryOnShort`; aqui é
-  // o veredito FINAL. Instrumentação (item 2.2): motor, nº de fontes e o tamanho.
+  // Portões de QUALIDADE (o portão de fonte só vê http+não-concorrente):
+  //   - relevância: ao menos UMA fonte precisa ter sinal do nicho no título+URL
+  //     (backstop universal — no Firecrawl as fontes já vêm filtradas por conteúdo;
+  //     aqui pega principalmente um fallback Sonar que trouxe off-topic).
+  //   - extensão: o piso de seções/palavras (os geradores já re-escreveram 1× se
+  //     retryOnShort; aqui é o veredito final).
+  // Prioriza off_topic (mais grave: assunto errado) sobre too_short.
   const length = checkArticleLength(draft.content);
+  const onNiche = sources.some((s) => hasNicheSignal(s.title, s.url));
+  const issue: QualityIssue | null = !onNiche
+    ? "off_topic"
+    : !length.ok
+      ? "too_short"
+      : null;
   console.info(
     `[generate-auto] engine=${engine} sources=${sources.length} ` +
       `recent=${!!recent} words=${length.words} sections=${length.sections} ` +
-      `lengthOk=${length.ok}`,
+      `lengthOk=${length.ok} onNiche=${onNiche} issue=${issue ?? "none"}`,
   );
 
-  // Curto + política "reject" (painel): não cria nada, devolve 422 amigável.
-  if (!length.ok && shortPolicy === "reject") {
+  // Problema + política "reject" (painel): não cria nada, devolve 422 amigável.
+  if (issue && shortPolicy === "reject") {
     console.warn(
-      `[generate-auto] rascunho curto rejeitado (words=${length.words}, ` +
-        `sections=${length.sections}) para o tema "${theme}"`,
+      `[generate-auto] rascunho rejeitado (${issue}: words=${length.words}, ` +
+        `sections=${length.sections}, onNiche=${onNiche}) para o tema "${theme}"`,
     );
-    return { ok: false, reason: "too_short", length, model };
+    return { ok: false, reason: issue, length, model };
   }
-  // Curto + "keepDraft" (cron): segue e cria como draft, mas marca tooShort para
+  // Problema + "keepDraft" (cron): segue e cria como draft, mas marca o issue para
   // o cron NÃO publicar — fica para revisão humana.
 
   const slug = await generateUniqueSlug(draft.suggestedSlug || draft.title);
@@ -254,7 +274,7 @@ export async function generateAutoArticle(
     article,
     engine,
     sourceCount: sources.length,
-    tooShort: !length.ok,
+    qualityIssue: issue,
     length,
   };
 }

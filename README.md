@@ -94,7 +94,7 @@ Em ambos, o rascunho nasce como assistido por IA e é **revisado pelo autor** an
 
 O `generate-auto` tem um **seletor de motor de busca**, com dois caminhos:
 
-- **Firecrawl** (padrão): busca as fontes via **API direta** (`POST /v2/search`) e traz o conteúdo de cada página já em **markdown**. Redes de puro ruído (Instagram/YouTube/TikTok/…) são excluídas na própria query (`-site:`) para não desperdiçar slots — **sem** tocar no LinkedIn, que às vezes traz artigo real do setor. O sistema filtra os concorrentes dessas fontes e o **modelo de texto escolhido escreve** o artigo a partir do material trazido — busca e escrita são etapas separadas.
+- **Firecrawl** (padrão): busca as fontes via **API direta** (`POST /v2/search`) e traz o conteúdo de cada página já em **markdown**. Redes de puro ruído (Instagram/YouTube/TikTok/…) são excluídas na própria query (`-site:`) para não desperdiçar slots — **sem** tocar no LinkedIn, que às vezes traz artigo real do setor. As fontes ainda passam por **descarte de índices** (home/listagem, não artigo) e **filtro de relevância** (a fonte precisa falar do nicho pelo conteúdo — off-topic como poliéster/portos é cortado; ver `lib/relevance`). O sistema filtra os concorrentes e o **modelo de texto escolhido escreve** o artigo a partir do que sobrou — busca e escrita são etapas separadas.
 - **Sonar**: o Perplexity Sonar **busca e escreve nativamente** (e um modelo não-Sonar recebe o plugin `web` da OpenRouter para buscar). É o comportamento original, mantido como opção.
 - **Fallback automático**: se o Firecrawl falhar (erro, limite de crédito, timeout) **ou** não sobrar nenhuma fonte não-concorrente, a busca cai no **Sonar** automaticamente — a geração não quebra por causa da busca. Só se o Sonar também falhar vira erro (`502`).
 
@@ -131,9 +131,9 @@ Um artigo pode ser agendado para aparecer no blog em uma data/hora futura (`publ
 
 ### Publicação diária automática (cron)
 
-Um **Vercel Cron** (`vercel.json`, `0 18 * * *` = 18:00 UTC = **15:00 BRT**) chama `GET /api/cron/daily-article` todo dia: a IA escolhe uma pauta **ancorada no momento atual** (a data de hoje entra no prompt), gera o rascunho por tema com **busca restrita aos últimos meses** (Firecrawl→Sonar; a recência vale nos **dois** motores — `tbs` no Firecrawl e `search_after_date_filter` no fallback Sonar) e o publica **pelo mesmo portão** da rota humana, **agendado** para aparecer às 09:00 BRT do **dia seguinte** (`publishAt` = 12:00 UTC de amanhã). Gerar de tarde é intencional: deixa a noite inteira como **janela de veto** antes de o texto ir ao ar. É **idempotente pelo slot de publicação** — não recria se já houver um `cron-daily` agendado para o slot de amanhã — e **autenticado** pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta.
+Um **Vercel Cron** (`vercel.json`, `0 18 * * *` = 18:00 UTC = **15:00 BRT**) chama `GET /api/cron/daily-article` todo dia: a IA escolhe uma pauta **ancorada no momento atual** (a data de hoje entra no prompt), gera o rascunho por tema com **preferência por conteúdo recente** (sort-by-date no último ano nos dois motores — não janela dura, que cegava temas evergreen) e o publica **pelo mesmo portão** da rota humana, **agendado** para aparecer às 09:00 BRT do **dia seguinte** (`publishAt` = 12:00 UTC de amanhã). Gerar de tarde é intencional: deixa a noite inteira como **janela de veto** antes de o texto ir ao ar. É **idempotente pelo slot de publicação** — não recria se já houver um `cron-daily` agendado para o slot de amanhã — e **autenticado** pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta.
 
-Como não há humano para vetar um texto ruim, o cron aplica um **piso de extensão** (≥3 seções, ≥250 palavras): se o modelo devolver um parágrafo/snippet, **re-escreve 1×**; se persistir, mantém como **draft sem publicar**. A regra de publicação (`lib/publish`) e a geração (`lib/generate-article`) são compartilhadas com o fluxo do painel (que rejeita o texto curto com `422`), num único lugar cada.
+Como não há humano para vetar um texto ruim, o cron aplica dois **portões de qualidade**: **extensão** (≥3 seções, ≥250 palavras — se vier parágrafo/snippet, **re-escreve 1×** e, persistindo, mantém como **draft sem publicar**) e **relevância** (ao menos uma fonte do nicho — senão não publica). A regra de publicação (`lib/publish`) e a geração (`lib/generate-article`) são compartilhadas com o fluxo do painel (que rejeita curto/off-topic com `422`), num único lugar cada.
 
 ### Assistente do blog (chatbot)
 
@@ -256,7 +256,7 @@ src/
     prisma, auth, validation, api-schemas, openapi, extract, ai, image,
     article-image, body-images, web-sources, firecrawl, competitors, chat,
     public-articles, site, categories, models, ideas, reading-time,
-    json-extract, toc, publish, generate-article, recency
+    json-extract, toc, publish, generate-article, recency, relevance
   proxy.ts                           # proteção das rotas /admin
 vercel.json                          # agenda do cron diário (Vercel Cron)
 API.md                               # documentação das rotas

@@ -74,6 +74,18 @@ export async function POST(req: Request) {
         { status: 422 },
       );
     }
+    if (outcome.reason === "off_topic") {
+      // A busca trouxe fontes fora do tema (a busca por tema às vezes degrada e
+      // retorna material off-topic). 422: gerar de novo, ou usar URLs manuais.
+      return Response.json(
+        {
+          error:
+            "As fontes encontradas não são do tema. Gere de novo, ajuste o tema/palavras-chave, ou use a geração manual com URLs.",
+          code: "ARTICLE_OFF_TOPIC",
+        },
+        { status: 422 },
+      );
+    }
     // no_sources: modelo não-nativo que não trouxe fonte provavelmente não
     // acionou bem o plugin `web` (típico dos lite) → orienta trocar por Sonar/
     // robusto. Sonar (nativo) sem fontes = realmente não achou não-concorrentes.

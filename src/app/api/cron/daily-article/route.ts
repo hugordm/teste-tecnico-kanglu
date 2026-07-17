@@ -137,16 +137,17 @@ export async function GET(req: Request) {
     sections: outcome.length.sections,
   };
 
-  // Rascunho curto que sobreviveu ao retry → NÃO publica. Fica de draft agendado
-  // para o veto/edição humana da noite.
-  if (outcome.tooShort) {
+  // Problema de qualidade (curto após o retry, ou fontes fora do tema) → NÃO
+  // publica. Fica de draft agendado para o veto/edição humana da noite — melhor
+  // nenhum artigo no ar que um parágrafo ou um texto off-topic.
+  if (outcome.qualityIssue) {
     console.warn(
-      `[cron] artigo ${outcome.article.id} ficou curto (words=${diag.words}, ` +
-        `sections=${diag.sections}); mantido como DRAFT, não publicado`,
+      `[cron] artigo ${outcome.article.id} com problema (${outcome.qualityIssue}: ` +
+        `words=${diag.words}, sections=${diag.sections}); mantido como DRAFT, não publicado`,
     );
     return Response.json({
       published: false,
-      reason: "too_short",
+      reason: outcome.qualityIssue,
       theme,
       article: { id: outcome.article.id, slug: outcome.article.slug },
       diag,

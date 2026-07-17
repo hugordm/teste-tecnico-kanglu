@@ -9,7 +9,8 @@ import {
   FirecrawlError,
   type FirecrawlSearchResult,
 } from "@/lib/firecrawl";
-import { recencyAfterDate } from "@/lib/recency";
+import { SONAR_RECENCY_FILTER } from "@/lib/recency";
+import { isIndexPage, isOnNicheByContent, nicheScore } from "@/lib/relevance";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -459,6 +460,22 @@ function filterFirecrawlSources(
       console.warn(`[firecrawl] concorrente descartado: ${r.url}`);
       continue;
     }
+    // Descarta HOME/listagem: passam o filtro de markdown vazio (índice TEM
+    // texto), mas não são artigo. Sinais conservadores (URL de índice / muitos
+    // links) — ver lib/relevance.
+    if (isIndexPage(r.url, r.markdown)) {
+      console.warn(`[firecrawl] índice/listagem descartado: ${r.url}`);
+      continue;
+    }
+    // Descarta off-topic: o portão só via http+não-concorrente, então poliéster/
+    // portos passavam. Score de nicho pelo CONTEÚDO (folga grande: off-topic ~1,
+    // fonte boa 7-11).
+    if (!isOnNicheByContent(r.title, r.markdown)) {
+      console.warn(
+        `[firecrawl] fora do nicho descartado (score=${nicheScore(`${r.title} ${r.markdown.slice(0, 6000)}`)}): ${r.url}`,
+      );
+      continue;
+    }
     const key = firecrawlDedupeKey(r.url);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -545,14 +562,13 @@ async function callOpenRouterWeb(
         //    que busca e injeta as mesmas `annotations`. Assim o seletor funciona
         //    aqui sem quebrar o fluxo de fontes.
         ...(useWebPlugin ? { plugins: [{ id: "web" }] } : {}),
-        // Recência no Sonar nativo (perplexity/*): `search_after_date_filter`
-        // restringe a busca a fontes DEPOIS do início da janela (mesma janela de 6
-        // meses do `tbs` do Firecrawl). Verificado empiricamente: sem ele o Sonar
-        // cita conteúdo de 2021; com ele, só dos últimos meses. Isso fecha o buraco
-        // do fallback — antes o Sonar buscava sem filtro nenhum de data. Só se
-        // aplica ao Sonar nativo; o plugin `web` (outro modelo) não conhece o param.
+        // Recência no Sonar nativo (perplexity/*): `search_recency_filter` = último
+        // ano — a PREFERÊNCIA por recente (não janela dura), análoga ao sbd:1,qdr:y
+        // do Firecrawl (ver lib/recency). Verificado respeitando o filtro. Fecha o
+        // buraco do fallback (antes buscava sem filtro de data). Só no Sonar nativo;
+        // o plugin `web` (outro modelo) não conhece o param.
         ...(params.recent && !useWebPlugin
-          ? { search_after_date_filter: recencyAfterDate() }
+          ? { search_recency_filter: SONAR_RECENCY_FILTER }
           : {}),
         // Sem `response_format`: o Sonar NÃO aceita `{ type: "json_object" }`
         // (só `json_schema`/`text`). Como o modelo já devolve o JSON pedido pelo
