@@ -99,6 +99,25 @@ Sugere ~5 **títulos** de artigos no nicho da Kanglu, opcionalmente focados num 
 
 ---
 
+## Automação (cron)
+
+### `GET /api/cron/daily-article`
+**Publicação diária automática.** Acionada pelo **Vercel Cron** (agendado em `vercel.json`: `0 18 * * *` = 18:00 UTC = **15:00 BRT**). Gera de tarde de propósito: o artigo só vai ao ar às 09:00 BRT do **dia seguinte**, deixando a noite inteira como janela de veto humano. Faz o fluxo ponta a ponta sem intervenção:
+1. **Autentica** o cron pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta. Sem a env `CRON_SECRET` a rota responde `500` (desabilitada de propósito, para não ficar aberta ao mundo).
+2. **Idempotência pelo slot de publicação:** se já existe um artigo `createdVia = "cron-daily"` **agendado para o slot de amanhã** (`publishAt` = 12:00 UTC do dia seguinte), devolve `skipped` sem recriar — reexecuções/retentativas da mesma rodada não duplicam. A chave é o horário de publicação, não o dia de criação.
+3. Pede **uma pauta** à IA ancorada no **momento atual** (a data de hoje é injetada no prompt; pautas atemporais são desencorajadas), gera o rascunho por tema com **busca restrita aos últimos meses** (motor Firecrawl→Sonar; no Firecrawl via `tbs`), marcado `createdVia: "cron-daily"`, e **publica pelo mesmo portão** de `POST /api/articles/[id]/publish` — a regra "≥1 fonte válida" é literalmente a mesma função (`lib/publish`).
+4. O artigo nasce **agendado** para `publishAt` = 12:00 UTC do dia seguinte (09:00 BRT): fica `published`, mas só aparece no blog na manhã seguinte à geração.
+
+**Respostas:**
+- `200` `{ "published": true, "theme": "...", "article": { ..., "publishAt": "<amanhã>T12:00:00Z" } }` — artigo do dia criado, publicado e agendado.
+- `200` `{ "skipped": true, "reason": "already-scheduled-for-slot", "slot": "...", ... }` — já há artigo agendado para o slot de amanhã.
+- `200` `{ "published": false, "reason": "..." }` — criado como draft, mas o portão barrou (raro; o rascunho fica salvo).
+- `401` segredo ausente/errado · `500` `CRON_SECRET` não configurado · `502` pauta ou geração da IA falhou (nada criado).
+
+> A regra de publicação (`lib/publish`) e a geração automática (`lib/generate-article`) são **compartilhadas** entre a rota humana e o cron — um único lugar para cada regra, sem risco de os dois caminhos divergirem.
+
+---
+
 ## Chatbot do blog
 
 ### `POST /api/chat`

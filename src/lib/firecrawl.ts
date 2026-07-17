@@ -34,6 +34,29 @@ const FIRECRAWL_TIMEOUT_MS = 30_000;
 const DEFAULT_LIMIT = 5;
 
 /**
+ * Janela de recência (em meses) quando a busca pede conteúdo ATUAL. O cron diário
+ * quer artigos ancorados no momento — não temas atemporais — então restringe a
+ * busca aos últimos N meses via `tbs` (time-based search do Firecrawl). Alguns
+ * meses (não semanas) é o equilíbrio: apertado o bastante para ser "atual", largo
+ * o bastante para ainda achar fontes em pt-BR do nicho (senão cai no Sonar à toa).
+ */
+const RECENCY_MONTHS = 6;
+
+/**
+ * Monta o valor `tbs` de intervalo de datas dos últimos `RECENCY_MONTHS` meses,
+ * no formato que o Firecrawl espera (herdado do Google): `cdr:1,cd_min:MM/DD/YYYY,
+ * cd_max:MM/DD/YYYY`. Usa a data de HOJE (runtime), então a janela acompanha o dia.
+ */
+function recencyTbs(): string {
+  const max = new Date();
+  const min = new Date();
+  min.setMonth(min.getMonth() - RECENCY_MONTHS);
+  const fmt = (d: Date) =>
+    `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+  return `cdr:1,cd_min:${fmt(min)},cd_max:${fmt(max)}`;
+}
+
+/**
  * Erro tratável do Firecrawl (chave ausente, HTTP de erro, limite de crédito,
  * rate limit, timeout, corpo inválido). Quem chama (rota) captura e cai no Sonar
  * — a busca nunca simplesmente quebra. `status` guarda o HTTP quando houver.
@@ -63,7 +86,7 @@ export interface FirecrawlSearchResult {
  */
 export async function firecrawlSearch(
   query: string,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; recent?: boolean } = {},
 ): Promise<FirecrawlSearchResult[]> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) {
@@ -88,6 +111,9 @@ export async function firecrawlSearch(
         // Só busca web (sem imagens/news); com scrape do conteúdo em markdown.
         sources: [{ type: "web" }],
         scrapeOptions: { formats: [{ type: "markdown" }] },
+        // Recência opcional: restringe aos últimos meses (conteúdo ATUAL do cron).
+        // Omitido no fluxo do painel — lá o editor pode querer um tema atemporal.
+        ...(opts.recent ? { tbs: recencyTbs() } : {}),
       }),
     });
   } catch (err) {

@@ -48,6 +48,14 @@ model Article {
   aiAssisted      Boolean       @default(false)
   aiModel         String?
 
+  // Origem da criação. Null = fluxo humano/manual (todo o app hoje). "cron-daily"
+  // = publicação diária automática (o cron da madrugada). String? nullable pelo
+  // mesmo motivo de `category`: migration aditiva (só ADD COLUMN), sem tocar nos
+  // artigos existentes, e o vocabulário pode crescer sem migration. Usado pela
+  // idempotência do cron (não recriar o artigo do dia) e disponível pra um badge
+  // "gerado automaticamente" no futuro.
+  createdVia      String?
+
   publishedAt     DateTime?
   // A partir de quando um artigo publicado deve aparecer no blog. Null =
   // aparece assim que publicado (comportamento padrão). Data futura = fica

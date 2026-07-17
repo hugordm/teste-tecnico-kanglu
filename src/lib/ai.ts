@@ -216,6 +216,13 @@ export interface GenerateWithWebParams {
   keywords?: string[];
   /** Modelo escolhido; sem ele, usa WEB_SEARCH_MODEL (Sonar). */
   model?: string;
+  /**
+   * Restringe a busca a conteúdo RECENTE (últimos meses). Usado pelo cron diário,
+   * que precisa de atualidade. Só o Firecrawl aplica o filtro (via `tbs`); no
+   * fallback Sonar a temporalidade fica por conta do próprio tema (que o cron já
+   * ancora no momento atual ao pedir a pauta).
+   */
+  recent?: boolean;
 }
 
 export interface GenerateWithWebResult {
@@ -321,10 +328,11 @@ const FIRECRAWL_MAX_TEXT_CHARS = 12_000;
 export async function generateDraftWithFirecrawl(
   params: GenerateWithWebParams,
 ): Promise<GenerateWithWebResult> {
-  const { theme, keywords, model } = params;
+  const { theme, keywords, model, recent } = params;
 
   // BUSCA: só o Firecrawl. Pode lançar FirecrawlError (rota → fallback Sonar).
-  const results = await firecrawlSearch(theme);
+  // `recent` restringe aos últimos meses (conteúdo atual do cron).
+  const results = await firecrawlSearch(theme, { recent });
 
   // CAMADA 1 — filtro de concorrentes + dedupe, ANTES de escrever. O Firecrawl
   // devolve URL real (sem redirect do Google), então filtramos direto.

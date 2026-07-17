@@ -74,6 +74,7 @@ O projeto sobe em poucos minutos. A geração por IA, as imagens e o chatbot sã
 | `OPENROUTER_IDEAS_MODEL` | Modelo da sugestão de pautas (padrão: `google/gemini-3.1-flash-lite`) |
 | `BLOB_READ_WRITE_TOKEN` | Token do Vercel Blob (upload das imagens) |
 | `NEXT_PUBLIC_SITE_URL` | URL pública do site (OG, canonical e sitemap absolutos) |
+| `CRON_SECRET` | Segredo do cron diário (`GET /api/cron/daily-article`). A Vercel injeta `Authorization: Bearer <valor>` ao acionar o cron; sem esta env a rota fica desabilitada (responde `500`) |
 
 Os modelos têm valores padrão no código; só é preciso defini-los para sobrescrever. As três variáveis marcadas como **default** definem apenas a opção **pré-selecionada** de cada fluxo — na tela de geração há um **seletor de modelo** (texto + imagem) que lista modelos curados da OpenRouter em runtime e permite escolher outro (ver *Seletor de modelo* abaixo).
 
@@ -128,6 +129,10 @@ Ao gerar um artigo, o sistema já cria **4 opções de imagem de capa** (Nano Ba
 
 Um artigo pode ser agendado para aparecer no blog em uma data/hora futura (`publishAt`). Enquanto agendado, fica publicado mas invisível no blog, com um selo "Agendado" no painel; aparece automaticamente quando a hora chega (filtro na query pública, sem cron).
 
+### Publicação diária automática (cron)
+
+Um **Vercel Cron** (`vercel.json`, `0 18 * * *` = 18:00 UTC = **15:00 BRT**) chama `GET /api/cron/daily-article` todo dia: a IA escolhe uma pauta **ancorada no momento atual** (a data de hoje entra no prompt), gera o rascunho por tema com **busca restrita aos últimos meses** (Firecrawl→Sonar) e o publica **pelo mesmo portão** da rota humana, **agendado** para aparecer às 09:00 BRT do **dia seguinte** (`publishAt` = 12:00 UTC de amanhã). Gerar de tarde é intencional: deixa a noite inteira como **janela de veto** antes de o texto ir ao ar. É **idempotente pelo slot de publicação** — não recria se já houver um `cron-daily` agendado para o slot de amanhã — e **autenticado** pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta. A regra de publicação (`lib/publish`) e a geração (`lib/generate-article`) são compartilhadas com o fluxo do painel, num único lugar cada.
+
 ### Assistente do blog (chatbot)
 
 Uma bolinha flutuante nas páginas do blog abre um chat que responde dúvidas sobre os **artigos publicados**. O contexto é montado dinamicamente a partir do banco (reflete adições/remoções de artigos sem alterar código), com orçamento de tokens. O escopo é limitado: perguntas fora dos temas do blog recebem uma recusa educada. Respostas em texto simples, sem markdown.
@@ -178,7 +183,7 @@ Gemini para gerar a partir de fontes fornecidas (rápido, econômico); na busca 
 
 ### O "portão" de publicação
 
-Estados: `draft → in_review → published` (+ `archived`). O único caminho para `published` é `POST /api/articles/[id]/publish`, que valida as fontes. O `POST` cria sempre como `draft`; o `PATCH` não aceita `published`. Impossível, por construção, publicar sem fonte válida.
+Estados: `draft → in_review → published` (+ `archived`). O único caminho para `published` é `POST /api/articles/[id]/publish`, que valida as fontes. O `POST` cria sempre como `draft`; o `PATCH` não aceita `published`. Impossível, por construção, publicar sem fonte válida. O portão foi extraído para `lib/publish` (`publishArticle`) e é **a mesma função** usada pela rota humana e pelo cron diário — a regra vive num só lugar, sem risco de os dois caminhos divergirem.
 
 ### 400 vs 422
 
@@ -230,6 +235,7 @@ src/
         [id]/generate-image/route.ts # gera 4 imagens → Vercel Blob
         generate/route.ts            # geração com URLs (Gemini)
         generate-auto/route.ts       # busca automática por tema (Firecrawl padrão | Sonar)
+      cron/daily-article/route.ts    # cron diário: gera + publica pelo portão
     api-doc/route.ts                 # Swagger interativo (Scalar) — público
     admin/                           # login, painel, editor, geradores, pautas
     blog/
@@ -248,8 +254,9 @@ src/
     prisma, auth, validation, api-schemas, openapi, extract, ai, image,
     article-image, body-images, web-sources, firecrawl, competitors, chat,
     public-articles, site, categories, models, ideas, reading-time,
-    json-extract, toc
+    json-extract, toc, publish, generate-article
   proxy.ts                           # proteção das rotas /admin
+vercel.json                          # agenda do cron diário (Vercel Cron)
 API.md                               # documentação das rotas
 ```
 

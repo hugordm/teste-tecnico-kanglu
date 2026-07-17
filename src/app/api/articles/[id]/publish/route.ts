@@ -1,14 +1,15 @@
-import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
-import { isValidHttpUrl } from "@/lib/validation";
+import { publishArticle } from "@/lib/publish";
 
 type Params = { params: Promise<{ id: string }> };
 
 /**
  * POST /api/articles/[id]/publish  (protegido)
  *
- * ÚNICO caminho para status `published`. Regra de negócio: um artigo só é
- * publicável se tiver ao menos UMA fonte com URL http/https válida.
+ * ÚNICO caminho HUMANO para status `published`. A regra de negócio — só publica
+ * quem tem ao menos UMA fonte com URL http/https válida — vive em `lib/publish`
+ * (o portão), compartilhada com o cron diário. Esta rota só faz auth e traduz o
+ * resultado do portão em HTTP.
  *
  * Falha na regra -> 422 (Unprocessable Entity), NÃO 400. O corpo/estado está
  * bem-formado; o que impede é a regra de negócio. Essa distinção é o ponto.
@@ -20,22 +21,13 @@ export async function POST(req: Request, { params }: Params) {
   }
 
   const { id } = await params;
-  const article = await prisma.article.findUnique({
-    where: { id },
-    include: { sources: true },
-  });
-  if (!article) {
-    return Response.json({ error: "Artigo não encontrado" }, { status: 404 });
-  }
+  const result = await publishArticle(id);
 
-  // Já publicado: idempotente, devolve como está (não é erro).
-  if (article.status === "published") {
-    return Response.json({ article, alreadyPublished: true });
-  }
-
-  // O portão: pelo menos uma fonte com URL http/https de verdade.
-  const validSources = article.sources.filter((s) => isValidHttpUrl(s.url));
-  if (validSources.length === 0) {
+  if (!result.ok) {
+    if (result.reason === "not_found") {
+      return Response.json({ error: "Artigo não encontrado" }, { status: 404 });
+    }
+    // no_valid_source -> 422 (não 400): corpo bem-formado, é a REGRA que barra.
     return Response.json(
       {
         error:
@@ -46,14 +38,10 @@ export async function POST(req: Request, { params }: Params) {
     );
   }
 
-  const published = await prisma.article.update({
-    where: { id },
-    data: {
-      status: "published",
-      publishedAt: article.publishedAt ?? new Date(),
-    },
-    include: { sources: true },
-  });
+  // Idempotente: já publicado devolve como está, sinalizando `alreadyPublished`.
+  if (result.alreadyPublished) {
+    return Response.json({ article: result.article, alreadyPublished: true });
+  }
 
-  return Response.json({ article: published });
+  return Response.json({ article: result.article });
 }

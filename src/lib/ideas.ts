@@ -57,11 +57,25 @@ FORMATO DE SAÍDA (obrigatório):
 Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cercas de código, exatamente neste formato:
 { "titles": ["Primeiro título", "Segundo título", "..."] }`;
 
+/** Data de hoje por extenso em pt-BR (fuso BRT), p/ ancorar pautas no momento. */
+function todayLongPtBr(): string {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "long",
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date());
+}
+
 /**
  * Monta o prompt do usuário: quantidade pedida + o tema/direção, se houver.
- * Sem tema, pedimos pautas gerais do nicho.
+ * Sem tema, pedimos pautas gerais do nicho. Com `recent`, injeta a DATA DE HOJE
+ * (o modelo não sabe que dia é) e pede pautas ancoradas no momento atual — o cron
+ * diário usa isto para o artigo do dia falar de algo recente, não atemporal.
  */
-function buildUserPrompt(count: number, theme?: string): string {
+function buildUserPrompt(
+  count: number,
+  theme?: string,
+  recent?: boolean,
+): string {
   const parts = [`Sugira ${count} títulos de artigos de blog.`];
   if (theme) {
     parts.push(
@@ -70,6 +84,11 @@ function buildUserPrompt(count: number, theme?: string): string {
   } else {
     parts.push(
       "Sem tema específico: sugira pautas gerais e variadas do nicho da Kanglu (e-commerce, logística, rastreamento, entregas, pós-venda).",
+    );
+  }
+  if (recent) {
+    parts.push(
+      `Hoje é ${todayLongPtBr()}. Priorize pautas ancoradas no MOMENTO ATUAL: tendências recentes, sazonalidade do período (datas do varejo, época do ano) e o que é relevante AGORA para lojistas — evite temas puramente atemporais/genéricos. Não invente fatos nem números; a atualidade deve estar no ângulo da pauta, não em estatísticas inventadas.`,
     );
   }
   parts.push("Responda apenas com o JSON no formato pedido.");
@@ -88,6 +107,10 @@ const ideasSchema = z.object({
 export interface SuggestIdeasParams {
   theme?: string;
   count?: number;
+  /**
+   * Ancora as pautas no momento atual (injeta a data de hoje + pede atualidade).
+   * O cron diário liga isto; o painel de pautas deixa desligado (default). */
+  recent?: boolean;
 }
 
 export interface SuggestIdeasResult {
@@ -127,7 +150,7 @@ export async function suggestIdeas(
         model: IDEAS_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildUserPrompt(count, theme) },
+          { role: "user", content: buildUserPrompt(count, theme, params.recent) },
         ],
         // Pede objeto JSON quando o provedor suporta; se ignorar, a extração
         // defensiva ainda limpa cercas e valida o shape.
