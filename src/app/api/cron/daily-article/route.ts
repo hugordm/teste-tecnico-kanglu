@@ -102,7 +102,9 @@ export async function GET(req: Request) {
   const pautaStart = Date.now();
   try {
     const { ideas } = await suggestIdeas({ count: 5, recent: true });
-    theme = ideas[0];
+    // O cron usa só o TÍTULO da 1ª pauta como tema (as keywords novas são para o
+    // painel; aqui não passamos keywords — o fluxo do cron segue idêntico).
+    theme = ideas[0].title;
   } catch (err) {
     const msg = err instanceof IdeasError ? err.message : String(err);
     console.warn(`[cron] sugestão de pauta falhou: ${msg}`);

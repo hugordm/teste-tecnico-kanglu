@@ -40,10 +40,13 @@ function GenerateAutoForm() {
   const toast = useToast();
   const searchParams = useSearchParams();
 
-  // Pré-preenche o tema com a pauta escolhida em /admin/ideas, se houver. Só o
-  // valor INICIAL vem da URL; depois o campo é livre (estado do usuário manda).
+  // Pré-preenche tema E palavras-chave com a pauta escolhida em /admin/ideas, se
+  // houver. Só o valor INICIAL vem da URL; depois os campos são livres (o estado
+  // do usuário manda). As keywords vêm por query param e são SANITIZADAS.
   const [theme, setTheme] = useState(() => searchParams.get("theme") ?? "");
-  const [keywords, setKeywords] = useState("");
+  const [keywords, setKeywords] = useState(() =>
+    sanitizeKeywordsParam(searchParams.get("keywords")),
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -249,6 +252,26 @@ function GenerateAutoFallback() {
       </main>
     </div>
   );
+}
+
+// Sanitiza as palavras-chave vindas por query param (?keywords=a, b, c): separa
+// por vírgula, limpa cada uma, descarta vazias/duplicatas, limita quantidade e
+// tamanho, e rejunta. Ausente/vazio → "" (o campo fica vazio, como sem pauta).
+// O React já escapa o value no input; isto é para conter ruído/abuso no param.
+function sanitizeKeywordsParam(raw: string | null): string {
+  if (!raw) return "";
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const clean = part.trim().replace(/\s+/g, " ").slice(0, 40).trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= 8) break;
+  }
+  return out.join(", ");
 }
 
 function Field({

@@ -385,14 +385,25 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           tags: ["Utilidades (IA)"],
           summary: "Sugere pautas",
           description:
-            "Sugere ~5 títulos de artigos no nicho da Kanglu (opcionalmente " +
-            "focados num tema). Não cria nada — as pautas são efêmeras.",
+            "Sugere ~5 pautas (título + 3-5 palavras-chave) no nicho da Kanglu " +
+            "(opcionalmente focadas num tema). Não cria nada — as pautas são efêmeras.",
           security: ADMIN_SECURITY,
           requestBody: jsonBody(ideasInput),
           responses: {
-            "200": jsonResponse("Lista de pautas.", {
+            "200": jsonResponse("Lista de pautas (título + palavras-chave).", {
               type: "object",
-              properties: { ideas: { type: "array", items: { type: "string" } } },
+              properties: {
+                ideas: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      title: { type: "string" },
+                      keywords: { type: "array", items: { type: "string" } },
+                    },
+                  },
+                },
+              },
             }),
             "400": ERR.badRequest,
             "401": ERR.unauthorized,

@@ -15,6 +15,8 @@ import { LoadingMessages, IDEAS_MESSAGES } from "../_components/loading-messages
 interface Idea {
   id: string;
   title: string;
+  /** Palavras-chave sugeridas pela IA (podem vir vazias). Levadas ao gerador. */
+  keywords: string[];
 }
 
 export default function IdeasPage() {
@@ -33,13 +35,21 @@ export default function IdeasPage() {
     setError(null);
     setLoading(true);
     try {
-      const data = await apiFetch<{ ideas: string[] }>("/api/ideas", {
+      const data = await apiFetch<{
+        ideas: { title: string; keywords?: string[] }[];
+      }>("/api/ideas", {
         method: "POST",
         body: { ...(theme.trim() ? { theme: theme.trim() } : {}) },
       });
       // Cada nova leva SUBSTITUI a lista (é "gerar novas sugestões").
       let n = seq;
-      setIdeas(data.ideas.map((title) => ({ id: `idea-${n++}`, title })));
+      setIdeas(
+        data.ideas.map((it) => ({
+          id: `idea-${n++}`,
+          title: it.title,
+          keywords: it.keywords ?? [],
+        })),
+      );
       setSeq(n);
       setHasSuggested(true);
     } catch (err) {
@@ -65,10 +75,13 @@ export default function IdeasPage() {
     setIdeas((prev) => prev.filter((i) => i.id !== id));
   }
 
-  // Manda a pauta para o gerador por tema, já preenchendo o campo Tema por
-  // query param. O usuário ainda revisa/ajusta e dispara a geração lá.
-  function generateFrom(title: string) {
-    router.push(`/admin/generate-auto?theme=${encodeURIComponent(title)}`);
+  // Manda a pauta para o gerador por tema, pré-preenchendo Tema E palavras-chave
+  // por query param. Ambos chegam editáveis — é sugestão, não imposição. Se a
+  // pauta não trouxer keywords, o param sai fora e o campo fica vazio como hoje.
+  function generateFrom(idea: Idea) {
+    const params = new URLSearchParams({ theme: idea.title });
+    if (idea.keywords.length) params.set("keywords", idea.keywords.join(", "));
+    router.push(`/admin/generate-auto?${params.toString()}`);
   }
 
   return (
@@ -178,7 +191,7 @@ function IdeaRow({
   idea: Idea;
   onEdit: (id: string, title: string) => void;
   onDiscard: (id: string) => void;
-  onGenerate: (title: string) => void;
+  onGenerate: (idea: Idea) => void;
 }) {
   const [editing, setEditing] = useState(false);
   // Rascunho local enquanto edita; só confirma no "Salvar" (ou Enter).
@@ -225,8 +238,20 @@ function IdeaRow({
           <h3 className="font-heading text-sm font-semibold text-kanglu-bordo">
             {idea.title}
           </h3>
+          {idea.keywords.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {idea.keywords.map((kw) => (
+                <span
+                  key={kw}
+                  className="rounded-full bg-kanglu-cream px-2 py-0.5 text-[11px] text-kanglu-bordo/70"
+                >
+                  {kw}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
-            <ActionBtn primary onClick={() => onGenerate(idea.title)}>
+            <ActionBtn primary onClick={() => onGenerate(idea)}>
               Gerar artigo →
             </ActionBtn>
             <ActionBtn onClick={startEdit}>Editar</ActionBtn>

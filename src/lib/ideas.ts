@@ -1,5 +1,4 @@
 import "server-only";
-import { z } from "zod";
 import { parseJsonLoose } from "@/lib/json-extract";
 
 // ---------------------------------------------------------------------------
@@ -52,10 +51,11 @@ REGRAS:
 - NÃO cite, elogie nem recomende empresas concorrentes ou plataformas de serviços semelhantes aos da Kanglu (rastreamento, gestão de fretes, notificações, ERPs com rastreio, hubs logísticos). Exemplos a evitar: Melhor Envio, Frenet, Intelipost, SmartEnvios, Bling, Loggi, Rastreio.net e similares. Fale dos conceitos de forma genérica, sem marcas.
 - Não invente estatísticas nem números específicos nos títulos.
 - Cada título é uma linha só, sem numeração, sem aspas, sem markdown.
+- Para CADA título, inclua de 3 a 5 PALAVRAS-CHAVE curtas do nicho, relevantes àquele título — termos que ajudam na busca de fontes e no SEO (ex.: "frete grátis", "prazo de entrega", "logística reversa"). Também em pt-BR, sem marcas de concorrentes.
 
 FORMATO DE SAÍDA (obrigatório):
 Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cercas de código, exatamente neste formato:
-{ "titles": ["Primeiro título", "Segundo título", "..."] }`;
+{ "ideas": [ { "title": "Primeiro título", "keywords": ["palavra-chave 1", "palavra-chave 2", "palavra-chave 3"] }, { "title": "Segundo título", "keywords": ["..."] } ] }`;
 
 /** Data de hoje por extenso em pt-BR (fuso BRT), p/ ancorar pautas no momento. */
 function todayLongPtBr(): string {
@@ -99,10 +99,15 @@ function buildUserPrompt(
 // Contrato de saída — validação defensiva
 // ---------------------------------------------------------------------------
 
-/** O shape que exigimos. Aceitamos `{titles:[...]}`; array cru é tratado antes. */
-const ideasSchema = z.object({
-  titles: z.array(z.string()),
-});
+/** Uma pauta: título + palavras-chave sugeridas (podem vir vazias). */
+export interface Idea {
+  title: string;
+  keywords: string[];
+}
+
+/** Teto de palavras-chave e tamanho de cada uma (contém abuso/ruído do modelo). */
+const MAX_KEYWORDS = 5;
+const MAX_KEYWORD_LEN = 40;
 
 export interface SuggestIdeasParams {
   theme?: string;
@@ -114,7 +119,7 @@ export interface SuggestIdeasParams {
 }
 
 export interface SuggestIdeasResult {
-  ideas: string[];
+  ideas: Idea[];
   model: string;
 }
 
@@ -214,39 +219,49 @@ function extractMessageContent(json: unknown): string | null {
 }
 
 /**
- * Extração defensiva: limpa cercas, faz JSON.parse e aceita tanto
- * `{ "titles": [...] }` quanto um array cru `[...]` (modelos às vezes ignoram o
- * wrapper). Depois normaliza cada título, remove numeração/aspas/markdown
- * residual, descarta vazios e duplicatas, e corta em `count`. Nunca lança —
- * devolve `[]` no pior caso e o chamador trata.
+ * Extração defensiva: limpa cercas, faz JSON.parse e aceita VÁRIOS formatos que o
+ * modelo pode devolver — `{ ideas: [{title, keywords}] }` (o pedido), o legado
+ * `{ titles: [...] }`, ou um array cru de strings/objetos. Normaliza cada item
+ * para `{ title, keywords }`, descarta vazios/duplicatas e corta em `count`. Se o
+ * item não trouxer keywords, elas ficam `[]` (o campo do gerador fica vazio, como
+ * hoje — não quebra). Nunca lança — devolve `[]` no pior caso.
  */
-function parseIdeas(raw: string, count: number): string[] {
-  // Mesma extração robusta do gerador (cercas + texto antes/depois): modelos
-  // diferentes formatam o JSON de jeitos diferentes.
+function parseIdeas(raw: string, count: number): Idea[] {
   const obj = parseJsonLoose(raw);
   if (obj === null) return [];
 
-  // Aceita array cru ou o objeto {titles:[...]}.
+  // Localiza a lista de itens: array cru, ou o campo `ideas`/`titles` do objeto.
   let list: unknown;
   if (Array.isArray(obj)) {
     list = obj;
-  } else {
-    const parsed = ideasSchema.safeParse(obj);
-    if (!parsed.success) return [];
-    list = parsed.data.titles;
+  } else if (typeof obj === "object") {
+    const o = obj as Record<string, unknown>;
+    list = Array.isArray(o.ideas)
+      ? o.ideas
+      : Array.isArray(o.titles)
+        ? o.titles
+        : null;
   }
   if (!Array.isArray(list)) return [];
 
   const seen = new Set<string>();
-  const out: string[] = [];
+  const out: Idea[] = [];
   for (const item of list) {
-    if (typeof item !== "string") continue;
-    const title = cleanTitle(item);
+    // Item pode ser uma string (título só) ou um objeto { title, keywords }.
+    let title = "";
+    let keywords: string[] = [];
+    if (typeof item === "string") {
+      title = cleanTitle(item);
+    } else if (item && typeof item === "object") {
+      const it = item as Record<string, unknown>;
+      if (typeof it.title === "string") title = cleanTitle(it.title);
+      keywords = cleanKeywords(it.keywords);
+    }
     if (!title) continue;
     const key = title.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(title);
+    out.push({ title, keywords });
     if (out.length >= count) break;
   }
   return out;
@@ -261,4 +276,32 @@ function cleanTitle(raw: string): string {
     .replace(/^["“']+|["”']+$/g, "") // aspas nas pontas
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Limpa e limita a lista de palavras-chave de uma pauta: só strings, sem
+ * marcadores/aspas, sem vazias nem duplicatas, cada uma com tamanho contido, e no
+ * máximo `MAX_KEYWORDS`. Qualquer coisa fora do esperado vira `[]`.
+ */
+function cleanKeywords(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of raw) {
+    if (typeof k !== "string") continue;
+    const clean = k
+      .trim()
+      .replace(/^\s*[-*•]\s*/, "")
+      .replace(/^["“']+|["”']+$/g, "")
+      .replace(/\s+/g, " ")
+      .slice(0, MAX_KEYWORD_LEN)
+      .trim();
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= MAX_KEYWORDS) break;
+  }
+  return out;
 }
