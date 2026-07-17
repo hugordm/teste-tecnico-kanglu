@@ -3,10 +3,12 @@ import { suggestIdeas, IdeasError } from "@/lib/ideas";
 import { generateAutoArticle } from "@/lib/generate-article";
 import { publishArticle } from "@/lib/publish";
 
-// Geração (busca web + escrita) + 4 imagens em paralelo passam de 1 minuto.
-// Vercel Cron aceita função longa; damos margem generosa.
+// Teto de execução. No plano atual da Vercel o limite real é 60s (Hobby), então
+// declaramos 60 — pedir mais é ignorado/capado. O fluxo medido cabe folgado: ~25s
+// no caminho feliz, ~35-40s no pior caso (retry de escrita curta). Se algum dia
+// migrar para um plano com teto maior, subir este número.
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 /** Marca que identifica os artigos nascidos deste cron (idempotência + badge futuro). */
 const CREATED_VIA = "cron-daily";
@@ -103,16 +105,20 @@ export async function GET(req: Request) {
   // `recent: true` restringe a busca aos últimos meses (conteúdo atual). O artigo
   // nasce agendado para o `publishSlot` (amanhã 09:00 BRT): gerado hoje às 15:00
   // BRT, só aparece no blog na manhã seguinte — janela de veto durante a noite.
+  // `shortPolicy: "keepDraft"` — sem humano no cron: se vier curto mesmo após o
+  // retry, cria como draft e NÃO publica (melhor nenhum artigo que um parágrafo).
   const outcome = await generateAutoArticle({
     theme,
     searchEngine: "firecrawl",
     createdVia: CREATED_VIA,
     recent: true,
     publishAt: publishSlot,
+    shortPolicy: "keepDraft",
   });
   if (!outcome.ok) {
     // generation_failed (IA fora) ou no_sources (sem fonte não-concorrente):
     // em ambos nada foi criado. Para o cron os dois são "hoje não deu" → 502.
+    // (too_short não ocorre aqui: keepDraft cria como draft em vez de rejeitar.)
     console.warn(
       `[cron] geração não produziu artigo (${outcome.reason}) para "${theme}"`,
     );
@@ -120,6 +126,31 @@ export async function GET(req: Request) {
       { error: "Geração automática não produziu artigo hoje.", theme },
       { status: 502 },
     );
+  }
+
+  // Instrumentação (item 2.2) ecoada na resposta para inspeção nos logs do cron:
+  // qual motor produziu as fontes, quantas, e o tamanho do texto.
+  const diag = {
+    engine: outcome.engine,
+    sourceCount: outcome.sourceCount,
+    words: outcome.length.words,
+    sections: outcome.length.sections,
+  };
+
+  // Rascunho curto que sobreviveu ao retry → NÃO publica. Fica de draft agendado
+  // para o veto/edição humana da noite.
+  if (outcome.tooShort) {
+    console.warn(
+      `[cron] artigo ${outcome.article.id} ficou curto (words=${diag.words}, ` +
+        `sections=${diag.sections}); mantido como DRAFT, não publicado`,
+    );
+    return Response.json({
+      published: false,
+      reason: "too_short",
+      theme,
+      article: { id: outcome.article.id, slug: outcome.article.slug },
+      diag,
+    });
   }
 
   // 3c) Publicação pelo MESMO portão da rota humana ------------------------
@@ -135,10 +166,14 @@ export async function GET(req: Request) {
       published: false,
       reason: result.reason,
       article: { id: outcome.article.id, slug: outcome.article.slug },
+      diag,
     });
   }
 
-  console.info(`[cron] artigo do dia publicado: ${result.article.slug}`);
+  console.info(
+    `[cron] artigo do dia publicado: ${result.article.slug} ` +
+      `(engine=${diag.engine} sources=${diag.sourceCount} words=${diag.words})`,
+  );
   return Response.json({
     published: true,
     theme,
@@ -149,5 +184,6 @@ export async function GET(req: Request) {
       status: result.article.status,
       publishAt: result.article.publishAt, // agendado p/ 12:00 UTC (09:00 BRT)
     },
+    diag,
   });
 }

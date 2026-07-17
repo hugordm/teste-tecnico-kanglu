@@ -77,8 +77,9 @@ Geração por **busca automática** (apenas o tema). Um **motor de busca** encon
   - **Fallback:** se o Firecrawl falhar (erro/limite/timeout) ou não sobrar fonte não-concorrente, cai automaticamente no Sonar.
 - `textModel` é validado **conforme o motor**: com `firecrawl`, contra a lista **ampla** (qualquer modelo, inclusive lite — só escreve); com `sonar`, contra a lista **robusta** (um "lite" é descartado e cai no default robusto). `imageModel` é validado contra a lista de imagem. Um id inválido/ausente cai no default do ambiente.
 
-As quatro proteções (filtro de concorrentes, `SYSTEM_PROMPT` completo, limpeza determinística da saída, portão `422`) valem nos dois motores — o Firecrawl só substitui a etapa de busca.
-**Respostas:** `201` · `422` se nenhuma fonte válida for encontrada (após o fallback; a mensagem orienta usar o Sonar/um modelo mais robusto ou a geração manual) · `400` · `401` · `502`.
+As quatro proteções (filtro de concorrentes, `SYSTEM_PROMPT` completo, limpeza determinística da saída, portão `422`) valem nos dois motores — o Firecrawl só substitui a etapa de busca. A busca do Firecrawl exclui redes sociais de puro ruído (Instagram/YouTube/TikTok/…) na própria query (`-site:`), sem tocar no LinkedIn; o filtro de markdown vazio segue como rede de segurança.
+**Piso de extensão:** o texto gerado precisa ser um artigo de verdade (≥3 seções `##` e ≥250 palavras). Abaixo disso é rejeitado com `422 { code: "ARTICLE_TOO_SHORT" }` — é variação do modelo (às vezes devolve um parágrafo/snippet); gerar de novo costuma resolver.
+**Respostas:** `201` · `422` sem fonte válida (após o fallback) **ou** `ARTICLE_TOO_SHORT` (texto curto) · `400` · `401` · `502`.
 
 ### `POST /api/articles/[id]/generate-image`
 Gera **4 novas opções** de imagem (Nano Banana 2) em paralelo, faz upload no Vercel Blob e as associa ao artigo (a 1ª vira capa). Descarta do Blob as opções anteriores não usadas. Aceita opcionalmente `imageModel` (validado contra a lista curada de imagem).
@@ -105,13 +106,16 @@ Sugere ~5 **títulos** de artigos no nicho da Kanglu, opcionalmente focados num 
 **Publicação diária automática.** Acionada pelo **Vercel Cron** (agendado em `vercel.json`: `0 18 * * *` = 18:00 UTC = **15:00 BRT**). Gera de tarde de propósito: o artigo só vai ao ar às 09:00 BRT do **dia seguinte**, deixando a noite inteira como janela de veto humano. Faz o fluxo ponta a ponta sem intervenção:
 1. **Autentica** o cron pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta. Sem a env `CRON_SECRET` a rota responde `500` (desabilitada de propósito, para não ficar aberta ao mundo).
 2. **Idempotência pelo slot de publicação:** se já existe um artigo `createdVia = "cron-daily"` **agendado para o slot de amanhã** (`publishAt` = 12:00 UTC do dia seguinte), devolve `skipped` sem recriar — reexecuções/retentativas da mesma rodada não duplicam. A chave é o horário de publicação, não o dia de criação.
-3. Pede **uma pauta** à IA ancorada no **momento atual** (a data de hoje é injetada no prompt; pautas atemporais são desencorajadas), gera o rascunho por tema com **busca restrita aos últimos meses** (motor Firecrawl→Sonar; no Firecrawl via `tbs`), marcado `createdVia: "cron-daily"`, e **publica pelo mesmo portão** de `POST /api/articles/[id]/publish` — a regra "≥1 fonte válida" é literalmente a mesma função (`lib/publish`).
-4. O artigo nasce **agendado** para `publishAt` = 12:00 UTC do dia seguinte (09:00 BRT): fica `published`, mas só aparece no blog na manhã seguinte à geração.
+3. Pede **uma pauta** à IA ancorada no **momento atual** (a data de hoje é injetada no prompt; pautas atemporais são desencorajadas), gera o rascunho por tema com **busca restrita aos últimos meses** (Firecrawl→Sonar; no Firecrawl via `tbs`, **e no fallback Sonar via `search_after_date_filter`** — mesma janela nos dois, fecha o buraco por onde entrava conteúdo antigo), marcado `createdVia: "cron-daily"`.
+4. Aplica o **piso de extensão** (≥3 seções, ≥250 palavras). Sem humano para vetar um parágrafo, o cron **re-escreve 1×** se vier curto; se persistir, **mantém como draft e NÃO publica** (melhor nenhum artigo que um snippet).
+5. Se passou no piso, **publica pelo mesmo portão** de `POST /api/articles/[id]/publish` (regra "≥1 fonte válida" = mesma função `lib/publish`), **agendado** para `publishAt` = 12:00 UTC do dia seguinte (09:00 BRT): fica `published`, mas só aparece no blog na manhã seguinte.
+
+Toda resposta traz um `diag` (instrumentação): `engine` (`firecrawl` / `sonar` / `sonar-fallback`), `sourceCount`, `words`, `sections` — para diagnóstico rápido nos logs.
 
 **Respostas:**
-- `200` `{ "published": true, "theme": "...", "article": { ..., "publishAt": "<amanhã>T12:00:00Z" } }` — artigo do dia criado, publicado e agendado.
+- `200` `{ "published": true, "theme": "...", "article": { ..., "publishAt": "<amanhã>T12:00:00Z" }, "diag": {...} }` — criado, publicado e agendado.
 - `200` `{ "skipped": true, "reason": "already-scheduled-for-slot", "slot": "...", ... }` — já há artigo agendado para o slot de amanhã.
-- `200` `{ "published": false, "reason": "..." }` — criado como draft, mas o portão barrou (raro; o rascunho fica salvo).
+- `200` `{ "published": false, "reason": "too_short" | "<portão>", "diag": {...} }` — criado como draft mas não publicado (texto curto após o retry, ou portão barrou); fica salvo para revisão.
 - `401` segredo ausente/errado · `500` `CRON_SECRET` não configurado · `502` pauta ou geração da IA falhou (nada criado).
 
 > A regra de publicação (`lib/publish`) e a geração automática (`lib/generate-article`) são **compartilhadas** entre a rota humana e o cron — um único lugar para cada regra, sem risco de os dois caminhos divergirem.

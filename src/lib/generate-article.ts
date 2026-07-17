@@ -4,6 +4,8 @@ import { generateUniqueSlug } from "@/lib/validation";
 import {
   generateDraftWithWebSearch,
   generateDraftWithFirecrawl,
+  checkArticleLength,
+  type ArticleLength,
   AiError,
 } from "@/lib/ai";
 import { generateAndUploadArticleImageOptions } from "@/lib/article-image";
@@ -24,6 +26,12 @@ import type { ArticleWithSources } from "@/lib/publish";
 // nas ROTAS (config de rota), não aqui.
 // ---------------------------------------------------------------------------
 
+/** Qual caminho de busca produziu as fontes (instrumentação — item 2.2). */
+export type SearchEngineUsed = "firecrawl" | "sonar" | "sonar-fallback";
+
+/** O que fazer quando o rascunho vem abaixo do piso de extensão. */
+export type ShortPolicy = "reject" | "keepDraft";
+
 export interface GenerateAutoParams {
   theme: string;
   keywords?: string[];
@@ -35,31 +43,50 @@ export interface GenerateAutoParams {
   /** Origem gravada no artigo (`createdVia`). Ex.: "cron-daily". Default: null. */
   createdVia?: string;
   /**
-   * Busca apenas conteúdo RECENTE (últimos meses). O cron diário liga isto para
-   * o artigo do dia falar do momento atual, não de tema atemporal. No Firecrawl
-   * vira filtro `tbs`; no fallback Sonar, a atualidade vem do próprio tema.
+   * Busca apenas conteúdo RECENTE (últimos meses). O cron diário liga isto para o
+   * artigo do dia falar do momento atual. No Firecrawl vira filtro `tbs`; no Sonar
+   * (nativo) vira `search_after_date_filter` — mesma janela (lib/recency).
    */
   recent?: boolean;
   /**
    * Agendamento de visibilidade (`publishAt`). Null/ausente = visível assim que
    * publicado. Data futura = fica `published` mas invisível no blog até a hora
-   * (mesmo mecanismo do agendamento manual). O cron usa isto para o artigo gerado
-   * de manhã só aparecer mais tarde. Gravado em UTC.
+   * (mesmo mecanismo do agendamento manual). Gravado em UTC.
    */
   publishAt?: Date;
+  /**
+   * Política para rascunho abaixo do piso de extensão (checkArticleLength):
+   *   - "reject" (default, painel): não cria nada; devolve `too_short` → 422. Tem
+   *     humano para gerar de novo.
+   *   - "keepDraft" (cron): re-tenta a escrita 1× (retryOnShort); se persistir,
+   *     CRIA como draft e sinaliza `tooShort` para o chamador NÃO publicar. Sem
+   *     humano, melhor nenhum artigo no ar que um parágrafo.
+   */
+  shortPolicy?: ShortPolicy;
 }
 
 /**
  * Resultado discriminado da geração:
- *   - ok                → artigo criado (draft, com fontes e talvez imagem).
+ *   - ok                → artigo criado (draft). `tooShort` diz se ficou abaixo do
+ *     piso mesmo após o retry (só acontece com shortPolicy "keepDraft"); o chamador
+ *     usa isso para não publicar. `engine`/`sourceCount`/`length` = instrumentação.
  *   - generation_failed → busca/geração da IA falhou (AiError). Nada criado. (502)
  *   - no_sources        → após filtrar, sobraram ZERO fontes. Nada criado. (422)
- *     Carrega o `model` usado para o chamador decidir a mensagem (nativo x não).
+ *   - too_short         → rascunho abaixo do piso e shortPolicy "reject". Nada
+ *     criado. (422) Carrega `length` para a mensagem.
  */
 export type GenerateAutoOutcome =
-  | { ok: true; article: ArticleWithSources }
+  | {
+      ok: true;
+      article: ArticleWithSources;
+      engine: SearchEngineUsed;
+      sourceCount: number;
+      tooShort: boolean;
+      length: ArticleLength;
+    }
   | { ok: false; reason: "generation_failed" }
-  | { ok: false; reason: "no_sources"; model: string };
+  | { ok: false; reason: "no_sources"; model: string }
+  | { ok: false; reason: "too_short"; length: ArticleLength; model: string };
 
 /**
  * Gera um rascunho a partir SÓ do tema: o motor escolhido busca fontes reais na
@@ -71,6 +98,9 @@ export async function generateAutoArticle(
 ): Promise<GenerateAutoOutcome> {
   const { theme, keywords, searchEngine, createdVia, recent, publishAt } =
     params;
+  const shortPolicy: ShortPolicy = params.shortPolicy ?? "reject";
+  // Só o cron (keepDraft) re-escreve um rascunho curto; o painel rejeita direto.
+  const retryOnShort = shortPolicy === "keepDraft";
 
   // Valida os modelos escolhidos contra a lista curada (allowlist); inválido/
   // ausente vira undefined → cai no default do env. O texto valida POR MOTOR:
@@ -86,7 +116,9 @@ export async function generateAutoArticle(
   //   - "firecrawl" (padrão): o Firecrawl busca e o modelo escreve. Se o
   //     Firecrawl falhar (erro/limite/timeout) OU não sobrar fonte, cai
   //     AUTOMATICAMENTE no Sonar. Só se o Sonar TAMBÉM falhar vira generation_failed.
+  // `engine` registra qual caminho REALMENTE produziu as fontes (instrumentação).
   let result;
+  let engine: SearchEngineUsed = searchEngine;
   try {
     if (searchEngine === "sonar") {
       result = await generateDraftWithWebSearch({
@@ -94,6 +126,7 @@ export async function generateAutoArticle(
         keywords,
         model: textModel,
         recent,
+        retryOnShort,
       });
     } else {
       try {
@@ -102,6 +135,7 @@ export async function generateAutoArticle(
           keywords,
           model: textModel,
           recent,
+          retryOnShort,
         });
       } catch (fcErr) {
         const msg = fcErr instanceof Error ? fcErr.message : String(fcErr);
@@ -110,7 +144,14 @@ export async function generateAutoArticle(
         );
         // Fallback SEMPRE no Sonar (env WEB_SEARCH_MODEL), sem passar o modelo
         // escritor: ele pode ser um "lite" que não busca bem. O Sonar é a rede.
-        result = await generateDraftWithWebSearch({ theme, keywords, recent });
+        // `recent` aqui aplica o search_after_date_filter do Sonar (item 2.1).
+        engine = "sonar-fallback";
+        result = await generateDraftWithWebSearch({
+          theme,
+          keywords,
+          recent,
+          retryOnShort,
+        });
       }
     }
   } catch (err) {
@@ -133,6 +174,26 @@ export async function generateAutoArticle(
     );
     return { ok: false, reason: "no_sources", model };
   }
+
+  // Piso de extensão. Os geradores já re-escreveram 1× se `retryOnShort`; aqui é
+  // o veredito FINAL. Instrumentação (item 2.2): motor, nº de fontes e o tamanho.
+  const length = checkArticleLength(draft.content);
+  console.info(
+    `[generate-auto] engine=${engine} sources=${sources.length} ` +
+      `recent=${!!recent} words=${length.words} sections=${length.sections} ` +
+      `lengthOk=${length.ok}`,
+  );
+
+  // Curto + política "reject" (painel): não cria nada, devolve 422 amigável.
+  if (!length.ok && shortPolicy === "reject") {
+    console.warn(
+      `[generate-auto] rascunho curto rejeitado (words=${length.words}, ` +
+        `sections=${length.sections}) para o tema "${theme}"`,
+    );
+    return { ok: false, reason: "too_short", length, model };
+  }
+  // Curto + "keepDraft" (cron): segue e cria como draft, mas marca tooShort para
+  // o cron NÃO publicar — fica para revisão humana.
 
   const slug = await generateUniqueSlug(draft.suggestedSlug || draft.title);
 
@@ -188,5 +249,12 @@ export async function generateAutoArticle(
     );
   }
 
-  return { ok: true, article };
+  return {
+    ok: true,
+    article,
+    engine,
+    sourceCount: sources.length,
+    tooShort: !length.ok,
+    length,
+  };
 }

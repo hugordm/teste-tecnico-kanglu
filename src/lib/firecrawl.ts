@@ -17,6 +17,8 @@
 //
 // A chave vem SÓ do ambiente (FIRECRAWL_API_KEY, fc-...), nunca hardcoded.
 
+import { recencyTbs } from "@/lib/recency";
+
 /** Endpoint da busca v2 do Firecrawl. */
 const FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search";
 
@@ -34,26 +36,30 @@ const FIRECRAWL_TIMEOUT_MS = 30_000;
 const DEFAULT_LIMIT = 5;
 
 /**
- * Janela de recência (em meses) quando a busca pede conteúdo ATUAL. O cron diário
- * quer artigos ancorados no momento — não temas atemporais — então restringe a
- * busca aos últimos N meses via `tbs` (time-based search do Firecrawl). Alguns
- * meses (não semanas) é o equilíbrio: apertado o bastante para ser "atual", largo
- * o bastante para ainda achar fontes em pt-BR do nicho (senão cai no Sonar à toa).
+ * Redes que só geram RUÍDO como fonte de artigo (vídeo/post curto, sem markdown
+ * aproveitável) e desperdiçam slots da busca — sobretudo com recência ligada, que
+ * enviesa o resultado pra elas (medido: 6/10 eram Instagram). Excluídas na própria
+ * query via operador `-site:`, que o Firecrawl RESPEITA (verificado empiricamente:
+ * com a exclusão, os slots de social viram fontes reais; sem, dominam a lista).
+ *
+ * LinkedIn ficou DE FORA de propósito: às vezes traz artigo real de veículo do
+ * setor (ex.: `/pulse/`). A exclusão aqui é só pra não gastar slot com ruído puro;
+ * o filtro de markdown vazio (extractResults) continua sendo a rede de segurança
+ * que descarta qualquer post fraco que passe.
  */
-const RECENCY_MONTHS = 6;
+const SOCIAL_EXCLUDES = [
+  "instagram.com",
+  "youtube.com",
+  "youtu.be",
+  "tiktok.com",
+  "facebook.com",
+  "x.com",
+  "twitter.com",
+];
 
-/**
- * Monta o valor `tbs` de intervalo de datas dos últimos `RECENCY_MONTHS` meses,
- * no formato que o Firecrawl espera (herdado do Google): `cdr:1,cd_min:MM/DD/YYYY,
- * cd_max:MM/DD/YYYY`. Usa a data de HOJE (runtime), então a janela acompanha o dia.
- */
-function recencyTbs(): string {
-  const max = new Date();
-  const min = new Date();
-  min.setMonth(min.getMonth() - RECENCY_MONTHS);
-  const fmt = (d: Date) =>
-    `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
-  return `cdr:1,cd_min:${fmt(min)},cd_max:${fmt(max)}`;
+/** Anexa os `-site:` de exclusão de redes sociais ao termo de busca. */
+function withSocialExcludes(query: string): string {
+  return `${query} ${SOCIAL_EXCLUDES.map((d) => `-site:${d}`).join(" ")}`;
 }
 
 /**
@@ -106,7 +112,7 @@ export async function firecrawlSearch(
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        query,
+        query: withSocialExcludes(query),
         limit: opts.limit ?? DEFAULT_LIMIT,
         // Só busca web (sem imagens/news); com scrape do conteúdo em markdown.
         sources: [{ type: "web" }],

@@ -62,6 +62,18 @@ export async function POST(req: Request) {
         { status: 502 },
       );
     }
+    if (outcome.reason === "too_short") {
+      // O modelo devolveu um texto abaixo do piso (parágrafo/snippet). É variação
+      // do modelo — gerar de novo costuma resolver. 422: entrada válida, saída ruim.
+      return Response.json(
+        {
+          error:
+            "O texto gerado ficou muito curto (menos que um artigo). Gere de novo — costuma sair melhor na próxima.",
+          code: "ARTICLE_TOO_SHORT",
+        },
+        { status: 422 },
+      );
+    }
     // no_sources: modelo não-nativo que não trouxe fonte provavelmente não
     // acionou bem o plugin `web` (típico dos lite) → orienta trocar por Sonar/
     // robusto. Sonar (nativo) sem fontes = realmente não achou não-concorrentes.

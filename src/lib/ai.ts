@@ -9,6 +9,7 @@ import {
   FirecrawlError,
   type FirecrawlSearchResult,
 } from "@/lib/firecrawl";
+import { recencyAfterDate } from "@/lib/recency";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -28,6 +29,39 @@ const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || "perplexity/sonar";
 
 /** Timeout da chamada ao LLM. Geração é mais lenta que um fetch de página. */
 const AI_TIMEOUT_MS = 60_000;
+
+// ---------------------------------------------------------------------------
+// Piso de extensão do artigo
+//
+// O modelo VARIA: com o mesmo material, um dia escreve um artigo, outro dia
+// devolve um parágrafo único (formato "featured snippet"). O SYSTEM_PROMPT pede
+// profundidade (ver ESTRUTURA E EXTENSÃO), mas os lite às vezes ignoram — então
+// há também esta checagem no código. Thresholds calibrados pelos artigos reais:
+// os aceitáveis têm ≥3 seções e ≥250 palavras; o parágrafo-snippet tem ~0-1 seção.
+// Quem decide o que fazer com um artigo curto é o chamador (o painel rejeita com
+// 422; o cron re-tenta e, se persistir, deixa como draft sem publicar).
+// ---------------------------------------------------------------------------
+
+export const MIN_ARTICLE_WORDS = 250;
+export const MIN_ARTICLE_SECTIONS = 3;
+
+export interface ArticleLength {
+  ok: boolean;
+  words: number;
+  sections: number;
+}
+
+/** Conta palavras e seções (`##`) do markdown e diz se passa do piso mínimo. */
+export function checkArticleLength(markdown: string): ArticleLength {
+  const trimmed = markdown.trim();
+  const words = trimmed ? trimmed.split(/\s+/).length : 0;
+  const sections = (markdown.match(/^##\s/gm) || []).length;
+  return {
+    ok: words >= MIN_ARTICLE_WORDS && sections >= MIN_ARTICLE_SECTIONS,
+    words,
+    sections,
+  };
+}
 
 /**
  * Erro tratável do gerador. A rota captura isto e responde 502 amigável, sem
@@ -109,6 +143,12 @@ REGRAS DE ESCRITA:
 - O texto deve ser original, coerente e útil para quem tem uma loja online.
 - NÃO use marcações de citação numeradas como [1], [2], [3] no texto. Escreva o conteúdo de forma fluida. As fontes serão listadas separadamente.
 - NÃO use notação LaTeX ou matemática (ex: \\text{}, \\times, \\div, \\frac, cifrões de fórmula ou colchetes de equação). Escreva fórmulas em texto simples e legível — ex: "Altura × Largura × Comprimento ÷ 6.000", usando os símbolos × e ÷ diretamente no texto.
+
+ESTRUTURA E EXTENSÃO (obrigatório):
+- Escreva um ARTIGO COMPLETO e aprofundado — NÃO uma resposta curta, uma definição, nem um único parágrafo de destaque (formato "featured snippet").
+- Estrutura mínima: uma introdução, AO MENOS 3 seções com subtítulo em ## (idealmente 3 a 5) e uma conclusão.
+- Desenvolva cada seção com profundidade: explique o porquê, dê contexto e exemplos conceituais aplicáveis a quem tem uma loja online. Mire em cerca de 500 palavras ou mais quando o material permitir.
+- A extensão vem de PROFUNDIDADE, não de repetição nem de encher com dados: as REGRAS FACTUAIS acima continuam valendo — se as fontes forem magras, aprofunde de forma conceitual, sem inventar estatísticas, números ou citações para "atingir tamanho".
 
 CATEGORIA (classificação):
 - Classifique o artigo em UMA destas categorias fixas, retornando exatamente o slug: "logistica" (estoque, armazenagem, rastreamento, transporte, entregas, prazos, frete), "atendimento" (pós-venda, suporte, relacionamento, fidelização, SAC), "marketing" (aquisição, tráfego, conteúdo, redes sociais, SEO, branding), "gestao" (processos, finanças, operação, indicadores, planejamento), "tecnologia" (automação, sistemas, integrações, plataformas, IA) ou "vendas" (funil, conversão, negociação, ticket médio, recompra, checkout).
@@ -218,11 +258,18 @@ export interface GenerateWithWebParams {
   model?: string;
   /**
    * Restringe a busca a conteúdo RECENTE (últimos meses). Usado pelo cron diário,
-   * que precisa de atualidade. Só o Firecrawl aplica o filtro (via `tbs`); no
-   * fallback Sonar a temporalidade fica por conta do próprio tema (que o cron já
-   * ancora no momento atual ao pedir a pauta).
+   * que precisa de atualidade. O Firecrawl aplica via `tbs`; o Sonar nativo via
+   * `search_after_date_filter` (ambos na mesma janela de `lib/recency`).
    */
   recent?: boolean;
+  /**
+   * Se o rascunho vier abaixo do piso de extensão (checkArticleLength), re-escreve
+   * UMA vez antes de devolver. Ligado pelo cron (sem humano para barrar um
+   * parágrafo); o painel deixa desligado e trata o curto com um 422. A re-escrita
+   * reaproveita as MESMAS fontes — no Firecrawl não re-busca (barato); no Sonar,
+   * como busca e escrita são acopladas, custa uma nova chamada.
+   */
+  retryOnShort?: boolean;
 }
 
 export interface GenerateWithWebResult {
@@ -279,7 +326,20 @@ export async function generateDraftWithWebSearch(
     // o retry ser sobre "zero fontes VÁLIDAS", não sobre "zero annotations".
     const sources = await resolveWebSources(annotations);
     last = { draft: parsed, model, sources };
-    if (sources.length > 0) return last;
+
+    if (sources.length > 0) {
+      // Fontes ok. Só re-tenta se o cron pediu (retryOnShort) E o texto veio
+      // abaixo do piso — e ainda há tentativa sobrando. Caso contrário, devolve.
+      const short = params.retryOnShort && !checkArticleLength(parsed.content).ok;
+      if (short && attempt < WEB_MAX_ATTEMPTS) {
+        console.warn(
+          `[ai] tentativa ${attempt}/${WEB_MAX_ATTEMPTS}: rascunho curto ` +
+            `(< piso), repetindo a geração…`,
+        );
+        continue;
+      }
+      return last;
+    }
 
     console.warn(
       `[ai] tentativa ${attempt}/${WEB_MAX_ATTEMPTS}: busca web voltou sem ` +
@@ -287,7 +347,7 @@ export async function generateDraftWithWebSearch(
     );
   }
 
-  // Todas as tentativas voltaram sem fontes válidas. Devolve a última (sources:[]).
+  // Esgotou as tentativas (sem fontes, ou ainda curto). Devolve a última.
   return last as GenerateWithWebResult;
 }
 
@@ -353,12 +413,27 @@ export async function generateDraftWithFirecrawl(
     model && !model.startsWith("perplexity/") ? model : undefined;
 
   // CAMADAS 2 e 3 (SYSTEM_PROMPT completo + limpeza/JSON robusto) vivem aqui.
-  const { draft, model: usedModel } = await generateDraft({
+  let { draft, model: usedModel } = await generateDraft({
     theme,
     keywords,
     sources,
     model: writingModel,
   });
+
+  // Retry por extensão (só quando o cron pede): se o texto veio abaixo do piso,
+  // re-escreve UMA vez com as MESMAS fontes — não re-busca (barato). A variação do
+  // modelo costuma resolver na 2ª. Fica com a versão que passar; se nenhuma passar,
+  // devolve a mais longa (quem chama decide não publicar).
+  if (params.retryOnShort && !checkArticleLength(draft.content).ok) {
+    console.warn("[ai] Firecrawl: rascunho curto (< piso), re-escrevendo…");
+    const retry = await generateDraft({ theme, keywords, sources, model: writingModel });
+    const firstOk = checkArticleLength(draft.content).ok;
+    const retryOk = checkArticleLength(retry.draft.content).ok;
+    if (retryOk || (!firstOk && retry.draft.content.length > draft.content.length)) {
+      draft = retry.draft;
+      usedModel = retry.model;
+    }
+  }
 
   return {
     draft,
@@ -470,6 +545,15 @@ async function callOpenRouterWeb(
         //    que busca e injeta as mesmas `annotations`. Assim o seletor funciona
         //    aqui sem quebrar o fluxo de fontes.
         ...(useWebPlugin ? { plugins: [{ id: "web" }] } : {}),
+        // Recência no Sonar nativo (perplexity/*): `search_after_date_filter`
+        // restringe a busca a fontes DEPOIS do início da janela (mesma janela de 6
+        // meses do `tbs` do Firecrawl). Verificado empiricamente: sem ele o Sonar
+        // cita conteúdo de 2021; com ele, só dos últimos meses. Isso fecha o buraco
+        // do fallback — antes o Sonar buscava sem filtro nenhum de data. Só se
+        // aplica ao Sonar nativo; o plugin `web` (outro modelo) não conhece o param.
+        ...(params.recent && !useWebPlugin
+          ? { search_after_date_filter: recencyAfterDate() }
+          : {}),
         // Sem `response_format`: o Sonar NÃO aceita `{ type: "json_object" }`
         // (só `json_schema`/`text`). Como o modelo já devolve o JSON pedido pelo
         // SYSTEM_PROMPT e o `safeParseDraft` limpa cercas + valida o shape, não
