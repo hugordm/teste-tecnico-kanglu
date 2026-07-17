@@ -19,6 +19,11 @@ export function BlogChat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Altura (px) que o teclado virtual cobre no mobile. No iOS/Android o `fixed` e
+  // o `vh` referenciam o layout viewport, que NÃO encolhe com o teclado — então
+  // sem isto o input fica atrás do teclado. Medimos pela visualViewport API e
+  // levantamos o painel. Só layout — não toca na lógica do chat.
+  const [kbInset, setKbInset] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -34,6 +39,26 @@ export function BlogChat() {
   // Foca o campo ao abrir a janela.
   useEffect(() => {
     if (open) inputRef.current?.focus();
+  }, [open]);
+
+  // Acompanha o teclado virtual (mobile) pela visualViewport API e guarda quanto
+  // ele cobre, para levantar o painel. Ignora variações pequenas (barras do
+  // browser) — só reage a um teclado de verdade. Desktop: inset ~0, sem efeito.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!open || !vv) return;
+    const update = () => {
+      const inset = window.innerHeight - vv.height - vv.offsetTop;
+      setKbInset(inset > 120 ? Math.round(inset) : 0);
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      setKbInset(0);
+    };
   }, [open]);
 
   async function send() {
@@ -124,7 +149,19 @@ export function BlogChat() {
         <div
           role="dialog"
           aria-label="Chat do blog da Kanglu"
-          className="fixed bottom-24 right-5 z-50 flex h-[70vh] max-h-[560px] w-[calc(100vw-2.5rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-kanglu-nude bg-white shadow-2xl"
+          // Mobile: bottom-sheet quase full-width, altura em `dvh` (acompanha as
+          // barras do browser). Desktop (sm+): EXATAMENTE o layout anterior —
+          // canto inferior direito, `max-w-sm`, `vh`. O `style` inline só entra
+          // quando há teclado (kbInset>0) e vence as classes, levantando o painel.
+          className="fixed inset-x-3 bottom-3 z-50 flex h-[70dvh] max-h-[600px] flex-col overflow-hidden rounded-2xl border border-kanglu-nude bg-white shadow-2xl sm:inset-x-auto sm:left-auto sm:right-5 sm:bottom-24 sm:h-[70vh] sm:max-h-[560px] sm:w-[calc(100vw-2.5rem)] sm:max-w-sm"
+          style={
+            kbInset
+              ? {
+                  bottom: kbInset + 8,
+                  maxHeight: `calc(100dvh - ${kbInset + 24}px)`,
+                }
+              : undefined
+          }
         >
           {/* Header */}
           <div className="flex items-center justify-between bg-kanglu-bordo px-4 py-3">
@@ -147,7 +184,7 @@ export function BlogChat() {
           {/* Mensagens */}
           <div
             ref={scrollRef}
-            className="flex-1 space-y-3 overflow-y-auto bg-kanglu-cream/40 px-4 py-4"
+            className="flex-1 space-y-3 overflow-y-auto overscroll-contain bg-kanglu-cream/40 px-4 py-4"
           >
             {messages.map((m, i) => (
               <div
@@ -155,7 +192,7 @@ export function BlogChat() {
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
+                  className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${
                     m.role === "user"
                       ? "rounded-br-sm bg-kanglu-orange text-white"
                       : "rounded-bl-sm border border-kanglu-nude bg-white text-kanglu-bordo"
