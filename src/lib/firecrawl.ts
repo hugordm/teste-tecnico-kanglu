@@ -18,48 +18,30 @@
 // A chave vem SÓ do ambiente (FIRECRAWL_API_KEY, fc-...), nunca hardcoded.
 
 import { FIRECRAWL_RECENCY_TBS } from "@/lib/recency";
+import { EXCLUDED_HOST_ROOTS } from "@/lib/relevance";
 
 /** Endpoint da busca v2 do Firecrawl. */
 const FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search";
 
 /**
- * Timeout da chamada. Busca + scrape de várias páginas é mais lento que um fetch
- * simples; se estourar, vira FirecrawlError e a rota cai no Sonar (fallback).
+ * Timeout da chamada — CURTO de propósito. Medido: o Firecrawl responde em ~7s
+ * (p50), com cauda de ~21s. Um teto alto (era 30s) gastava metade do orçamento do
+ * cron (60s) numa chamada lenta ANTES de o fallback Sonar começar. 12s cobre ~p75;
+ * quando o Firecrawl demora mais, é melhor desistir cedo e cair no Sonar (grátis)
+ * do que gastar crédito + tempo esperando. Se estourar, vira FirecrawlError.
  */
-const FIRECRAWL_TIMEOUT_MS = 30_000;
+const FIRECRAWL_TIMEOUT_MS = 12_000;
 
 /**
- * Quantos resultados pedir. Cada resultado com scrape consome crédito do free
- * tier, então mantemos baixo — 5 fontes já é material de sobra pro modelo
- * escrever com lastro.
+ * Quantos resultados pedir. Cada resultado scrapeado consome crédito (~2 base +
+ * 1/resultado; limit=5 ≈ 7 créditos/run), então mantemos baixo — poucas fontes
+ * já é lastro de sobra pro modelo escrever.
  */
 const DEFAULT_LIMIT = 5;
 
-/**
- * Redes que só geram RUÍDO como fonte de artigo (vídeo/post curto, sem markdown
- * aproveitável) e desperdiçam slots da busca — sobretudo com recência ligada, que
- * enviesa o resultado pra elas (medido: 6/10 eram Instagram). Excluídas na própria
- * query via operador `-site:`, que o Firecrawl RESPEITA (verificado empiricamente:
- * com a exclusão, os slots de social viram fontes reais; sem, dominam a lista).
- *
- * LinkedIn ficou DE FORA de propósito: às vezes traz artigo real de veículo do
- * setor (ex.: `/pulse/`). A exclusão aqui é só pra não gastar slot com ruído puro;
- * o filtro de markdown vazio (extractResults) continua sendo a rede de segurança
- * que descarta qualquer post fraco que passe.
- */
-const SOCIAL_EXCLUDES = [
-  "instagram.com",
-  "youtube.com",
-  "youtu.be",
-  "tiktok.com",
-  "facebook.com",
-  "x.com",
-  "twitter.com",
-];
-
-/** Anexa os `-site:` de exclusão de redes sociais ao termo de busca. */
-function withSocialExcludes(query: string): string {
-  return `${query} ${SOCIAL_EXCLUDES.map((d) => `-site:${d}`).join(" ")}`;
+/** Anexa os `-site:` de exclusão (redes de ruído + dumps de doc) ao termo. */
+function withHostExcludes(query: string): string {
+  return `${query} ${EXCLUDED_HOST_ROOTS.map((d) => `-site:${d}`).join(" ")}`;
 }
 
 /**
@@ -112,7 +94,7 @@ export async function firecrawlSearch(
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        query: withSocialExcludes(query),
+        query: withHostExcludes(query),
         limit: opts.limit ?? DEFAULT_LIMIT,
         // Só busca web (sem imagens/news); com scrape do conteúdo em markdown.
         sources: [{ type: "web" }],

@@ -14,6 +14,14 @@ export const maxDuration = 60;
 const CREATED_VIA = "cron-daily";
 
 /**
+ * Orçamento (ms desde o início do handler) até o qual ainda vale INICIAR o
+ * fallback Sonar. Passado disto, se o Firecrawl falhou, aborta em vez de arriscar
+ * o timeout de 60s no meio. 35s deixa margem para Sonar (~9-14s) + imagens (~7-30s)
+ * caber nos 60s. Medido: caminho feliz ~28s; fallback com timeout de 30s dava 57s.
+ */
+const FALLBACK_BUDGET_MS = 35_000;
+
+/**
  * GET /api/cron/daily-article  — publicação diária automática.
  *
  * Acionada pelo Vercel Cron (ver `vercel.json`: `0 18 * * *` = 18:00 UTC = 15:00
@@ -43,6 +51,8 @@ const CREATED_VIA = "cron-daily";
  *   502 { error }                    — pauta ou geração da IA falhou; nada criado.
  */
 export async function GET(req: Request) {
+  const startedAt = Date.now(); // orçamento de tempo (guarda de fallback + diag)
+
   // 1) Autenticação do cron ------------------------------------------------
   const secret = process.env.CRON_SECRET;
   if (!secret) {
@@ -89,6 +99,7 @@ export async function GET(req: Request) {
   // hoje) — o pedido central da cliente: conteúdo ATUAL, não atemporal. Falha da
   // IA aqui vira 502 amigável — nada é criado.
   let theme: string;
+  const pautaStart = Date.now();
   try {
     const { ideas } = await suggestIdeas({ count: 5, recent: true });
     theme = ideas[0];
@@ -100,6 +111,7 @@ export async function GET(req: Request) {
       { status: 502 },
     );
   }
+  const pautaMs = Date.now() - pautaStart;
 
   // 3b) Geração (draft com fontes reais) — motor padrão Firecrawl→Sonar -----
   // `recent: true` restringe a busca aos últimos meses (conteúdo atual). O artigo
@@ -114,6 +126,8 @@ export async function GET(req: Request) {
     recent: true,
     publishAt: publishSlot,
     shortPolicy: "keepDraft",
+    // Guarda de orçamento: não inicia o fallback Sonar se já passou de 35s.
+    deadlineMs: startedAt + FALLBACK_BUDGET_MS,
   });
   if (!outcome.ok) {
     // generation_failed (IA fora) ou no_sources (sem fonte não-concorrente):
@@ -128,13 +142,20 @@ export async function GET(req: Request) {
     );
   }
 
-  // Instrumentação (item 2.2) ecoada na resposta para inspeção nos logs do cron:
-  // qual motor produziu as fontes, quantas, e o tamanho do texto.
+  // Instrumentação ecoada na resposta para inspeção nos logs do cron: qual motor
+  // produziu as fontes, quantas, o tamanho do texto e o TEMPO de cada etapa
+  // (pauta/geração/imagens/total) — para caçar de onde vem qualquer estouro de 60s.
   const diag = {
     engine: outcome.engine,
     sourceCount: outcome.sourceCount,
     words: outcome.length.words,
     sections: outcome.length.sections,
+    ms: {
+      pauta: pautaMs,
+      geracao: outcome.timing.genMs,
+      imagens: outcome.timing.imagesMs,
+      total: Date.now() - startedAt,
+    },
   };
 
   // Problema de qualidade (curto após o retry, ou fontes fora do tema) → NÃO

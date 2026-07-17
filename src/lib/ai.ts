@@ -10,7 +10,15 @@ import {
   type FirecrawlSearchResult,
 } from "@/lib/firecrawl";
 import { SONAR_RECENCY_FILTER } from "@/lib/recency";
-import { isIndexPage, isOnNicheByContent, nicheScore } from "@/lib/relevance";
+import {
+  isIndexPage,
+  isOnNicheByContent,
+  isLikelyPortuguese,
+  isExcludedHost,
+  hasStaleYearInUrl,
+  hasNicheSignal,
+  nicheScore,
+} from "@/lib/relevance";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -130,6 +138,9 @@ REGRAS FACTUAIS (inegociáveis):
 - Não invente URLs, autores ou instituições.
 - Se as fontes forem insuficientes para um tópico, escreva de forma geral e conceitual, sem alegar fatos específicos que você não tem.
 - Ao usar um dado específico de uma fonte, deixe claro no texto de onde veio (ex.: 'segundo a ABComm...', 'de acordo com o E-Commerce Brasil...'), citando o nome da fonte de forma natural no corpo do artigo.
+
+IDIOMA (inegociável):
+- Escreva em PORTUGUÊS DO BRASIL correto, do começo ao fim. Se ALGUMA fonte estiver em espanhol, inglês ou outro idioma, TRADUZA integralmente para pt-BR — NUNCA copie termos, palavras ou trechos no idioma original. Exemplos do que é PROIBIDO: 'flota' (use 'frota'), 'kilómetros' (use 'quilômetros'), 'reentregas'/'condutores'/'tercerizada' vindos do espanhol. Na dúvida sobre uma palavra estrangeira, reescreva a ideia em português natural.
 
 REGRA DE MARCA (Kanglu):
 - Este é o blog da Kanglu, uma plataforma de rastreamento de pedidos, notificações ao cliente e experiência pós-compra para e-commerce.
@@ -325,7 +336,9 @@ export async function generateDraftWithWebSearch(
 
     // Desembrulha (se preciso) + descarta concorrentes/duplicatas já aqui, para
     // o retry ser sobre "zero fontes VÁLIDAS", não sobre "zero annotations".
-    const sources = await resolveWebSources(annotations);
+    // Depois passa pelo pós-filtro do Sonar (o caminho que menos filtra, e que
+    // vira o NORMAL quando o Firecrawl fica raro por crédito/timeout).
+    const sources = filterSonarSources(await resolveWebSources(annotations));
     last = { draft: parsed, model, sources };
 
     if (sources.length > 0) {
@@ -460,11 +473,24 @@ function filterFirecrawlSources(
       console.warn(`[firecrawl] concorrente descartado: ${r.url}`);
       continue;
     }
+    // Host de ruído/documento (Scribd & cia) ou URL com ano antigo — a query já
+    // exclui os hosts via -site:, mas isto é a rede caso escape; o ano antigo pega
+    // o que a recência soft deixou passar.
+    if (isExcludedHost(r.url) || hasStaleYearInUrl(r.url)) {
+      console.warn(`[firecrawl] host/ano descartado: ${r.url}`);
+      continue;
+    }
     // Descarta HOME/listagem: passam o filtro de markdown vazio (índice TEM
     // texto), mas não são artigo. Sinais conservadores (URL de índice / muitos
     // links) — ver lib/relevance.
     if (isIndexPage(r.url, r.markdown)) {
       console.warn(`[firecrawl] índice/listagem descartado: ${r.url}`);
+      continue;
+    }
+    // Descarta fonte NÃO-portuguesa: espanhol vazava termos pro texto ("flota",
+    // "kilómetros"). Detecção por conteúdo (Firecrawl não tem filtro de idioma).
+    if (!isLikelyPortuguese(r.markdown)) {
+      console.warn(`[firecrawl] fonte não-portuguesa descartada: ${r.url}`);
       continue;
     }
     // Descarta off-topic: o portão só via http+não-concorrente, então poliéster/
@@ -490,6 +516,33 @@ function filterFirecrawlSources(
   }
 
   return out;
+}
+
+/**
+ * Pós-filtro das citações do Sonar (fallback). NÃO temos o conteúdo delas (a
+ * perplexity lê as páginas internamente), então só dá pra filtrar por URL+título
+ * — mais fraco que o filtro de CONTEÚDO do Firecrawl, mas sobe o piso do caminho
+ * que menos filtra. IMPORTANTE: enquanto o Firecrawl for raro (crédito/timeout),
+ * ESTE é o caminho NORMAL do cron — daí valer a pena filtrar aqui também.
+ * O que dá pra checar sem conteúdo: host de ruído/documento, ano antigo na URL,
+ * índice pela URL, e sinal de nicho no título+URL. Idioma fica com o prompt.
+ */
+function filterSonarSources(sources: ResolvedSource[]): ResolvedSource[] {
+  return sources.filter((s) => {
+    if (isExcludedHost(s.url) || hasStaleYearInUrl(s.url)) {
+      console.warn(`[sonar] host/ano descartado: ${s.url}`);
+      return false;
+    }
+    if (isIndexPage(s.url, "")) {
+      console.warn(`[sonar] índice descartado: ${s.url}`);
+      return false;
+    }
+    if (!hasNicheSignal(s.title, s.url)) {
+      console.warn(`[sonar] fora do nicho descartado: ${s.url}`);
+      return false;
+    }
+    return true;
+  });
 }
 
 /** Chave de dedup: host + pathname (ignora query/hash e barra final). */

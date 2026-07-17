@@ -86,6 +86,13 @@ export async function POST(req: Request) {
         { status: 422 },
       );
     }
+    if (outcome.reason === "budget_exceeded") {
+      // Não deve ocorrer no painel (só o cron passa deadlineMs), mas o tipo exige.
+      return Response.json(
+        { error: "Geração excedeu o tempo. Tente novamente." },
+        { status: 502 },
+      );
+    }
     // no_sources: modelo não-nativo que não trouxe fonte provavelmente não
     // acionou bem o plugin `web` (típico dos lite) → orienta trocar por Sonar/
     // robusto. Sonar (nativo) sem fontes = realmente não achou não-concorrentes.

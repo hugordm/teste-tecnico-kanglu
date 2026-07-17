@@ -64,6 +64,13 @@ export interface GenerateAutoParams {
    *     humano, melhor nenhum artigo no ar que um parágrafo.
    */
   shortPolicy?: ShortPolicy;
+  /**
+   * Instante-limite (`Date.now()`) para INICIAR o fallback Sonar. Se o Firecrawl
+   * falhar e este ponto já tiver passado, aborta com `budget_exceeded` em vez de
+   * arriscar o timeout no meio (a Vercel mata a função sem retry nem alerta — pior
+   * que "hoje não deu"). Só o cron passa isto; o painel (humano esperando) não.
+   */
+  deadlineMs?: number;
 }
 
 /**
@@ -92,9 +99,12 @@ export type GenerateAutoOutcome =
       sourceCount: number;
       qualityIssue: QualityIssue | null;
       length: ArticleLength;
+      /** Timing por etapa (ms) para o diag do cron. */
+      timing: { genMs: number; imagesMs: number };
     }
   | { ok: false; reason: "generation_failed" }
   | { ok: false; reason: "no_sources"; model: string }
+  | { ok: false; reason: "budget_exceeded" }
   | { ok: false; reason: QualityIssue; length: ArticleLength; model: string };
 
 /**
@@ -128,6 +138,7 @@ export async function generateAutoArticle(
   // `engine` registra qual caminho REALMENTE produziu as fontes (instrumentação).
   let result;
   let engine: SearchEngineUsed = searchEngine;
+  const genStart = Date.now();
   try {
     if (searchEngine === "sonar") {
       result = await generateDraftWithWebSearch({
@@ -151,9 +162,20 @@ export async function generateAutoArticle(
         console.warn(
           `[generate-auto] Firecrawl indisponível, caindo no Sonar: ${msg}`,
         );
+        // Guarda de orçamento: se o Firecrawl já queimou o tempo (timeout) e
+        // passamos do limite, NÃO inicia o fallback — o Sonar (9-14s) + imagens
+        // estouraria o teto e a Vercel mataria a função no meio, sem artigo nem
+        // erro visível. "Hoje não deu" (draft/skip) é melhor que morrer no meio.
+        if (params.deadlineMs && Date.now() > params.deadlineMs) {
+          console.warn(
+            `[generate-auto] orçamento estourado (${Date.now() - genStart}ms na busca); ` +
+              `NÃO inicia o fallback Sonar`,
+          );
+          return { ok: false, reason: "budget_exceeded" };
+        }
         // Fallback SEMPRE no Sonar (env WEB_SEARCH_MODEL), sem passar o modelo
         // escritor: ele pode ser um "lite" que não busca bem. O Sonar é a rede.
-        // `recent` aqui aplica o search_after_date_filter do Sonar (item 2.1).
+        // `recent` aqui aplica o search_recency_filter=year do Sonar.
         engine = "sonar-fallback";
         result = await generateDraftWithWebSearch({
           theme,
@@ -170,6 +192,7 @@ export async function generateAutoArticle(
     }
     throw err;
   }
+  const genMs = Date.now() - genStart;
 
   // As fontes já vêm desembrulhadas e sem concorrentes (resolvidas dentro dos
   // geradores, que também já re-tentaram o caso "zero válidas").
@@ -250,6 +273,7 @@ export async function generateAutoArticle(
   // se a geração/upload falhar, engolimos o erro (warn) e devolvemos sem imagem.
   // Gera 4 opções EM PARALELO: a 1ª que der certo vira capa (ogImage); todas
   // ficam em imageOptions para escolha posterior no editor.
+  const imgStart = Date.now();
   try {
     const { urls, credit } = await generateAndUploadArticleImageOptions(
       article.id,
@@ -268,6 +292,7 @@ export async function generateAutoArticle(
       `[generate-auto] imagem automática falhou (artigo mantido): ${msg}`,
     );
   }
+  const imagesMs = Date.now() - imgStart;
 
   return {
     ok: true,
@@ -276,5 +301,6 @@ export async function generateAutoArticle(
     sourceCount: sources.length,
     qualityIssue: issue,
     length,
+    timing: { genMs, imagesMs },
   };
 }
