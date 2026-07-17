@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { slugify } from "@/lib/validation";
-import type { ExtractedSource } from "@/lib/extract";
+import { extractFromUrl, type ExtractedSource } from "@/lib/extract";
 import { resolveWebSources, type ResolvedSource } from "@/lib/web-sources";
 import { parseJsonLoose } from "@/lib/json-extract";
 import { isCompetitorUrl } from "@/lib/competitors";
@@ -179,6 +179,25 @@ Responda APENAS com um objeto JSON válido, sem texto antes ou depois, sem cerca
 }`;
 
 /**
+ * Contexto temporal — o modelo NÃO sabe em que dia vive (o cutoff é antigo). Sem
+ * isto ele erra o tempo: já mandou "prepare-se para a Copa" no dia em que a Copa
+ * estava acabando. Injeta a data de HOJE e manda situar o texto no tempo. Usado
+ * nos DOIS fluxos de escrita (generateDraft e a escrita nativa do Sonar).
+ */
+function temporalContextLine(): string {
+  const hoje = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "long",
+    timeZone: "America/Sao_Paulo",
+  }).format(new Date());
+  return (
+    `CONTEXTO TEMPORAL: hoje é ${hoje}. Situe o texto no tempo — trate eventos ` +
+    `que JÁ aconteceram (ou estão terminando) no passado, NÃO como planejamento ` +
+    `futuro; leve em conta a época do ano. Não invente datas nem trate como "por ` +
+    `vir" algo que já ocorreu.`
+  );
+}
+
+/**
  * Monta o prompt do usuário: tema + keywords + as fontes numeradas. As fontes
  * entram com título, URL e o texto extraído — é o material factual que o
  * modelo tem permissão de usar.
@@ -204,6 +223,7 @@ function buildUserPrompt(params: GenerateDraftParams): string {
     });
   }
 
+  parts.push(`\n${temporalContextLine()}`);
   parts.push(
     "\nGere o artigo seguindo TODAS as regras. Responda apenas com o JSON.",
   );
@@ -456,66 +476,156 @@ export async function generateDraftWithFirecrawl(
   };
 }
 
-/**
- * Converte os resultados do Firecrawl em fontes aproveitáveis: descarta
- * concorrentes (competitors.ts) e duplicatas (por host+path), e trunca o
- * markdown ao teto. Devolve `ExtractedSource[]` — o mesmo shape que o
- * `generateDraft` (fluxo manual) já consome. Pode devolver lista vazia.
- */
-function filterFirecrawlSources(
-  results: FirecrawlSearchResult[],
-): ExtractedSource[] {
-  const seen = new Set<string>();
-  const out: ExtractedSource[] = [];
+/** Fonte com conteúdo bruto para filtrar (Firecrawl: markdown; scrape: texto). */
+interface RawContentSource {
+  title: string;
+  url: string;
+  content: string;
+}
 
-  for (const r of results) {
+/**
+ * A RÉGUA ÚNICA de qualidade de fonte por CONTEÚDO — usada pelo Firecrawl E pelo
+ * scrape das citações do Sonar (paridade). Descarta, em ordem: concorrente,
+ * host de ruído/documento, ano antigo na URL, índice/listagem, idioma não-pt, e
+ * off-topic (score de nicho < 4). Depois dedupa por host+path. Um só lugar para
+ * a régra não divergir entre os dois caminhos. `tag` só rotula os logs.
+ */
+function filterContentSources<T extends RawContentSource>(
+  items: T[],
+  tag: string,
+): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const r of items) {
     if (isCompetitorUrl(r.url)) {
-      console.warn(`[firecrawl] concorrente descartado: ${r.url}`);
+      console.warn(`[${tag}] concorrente descartado: ${r.url}`);
       continue;
     }
-    // Host de ruído/documento (Scribd & cia) ou URL com ano antigo — a query já
-    // exclui os hosts via -site:, mas isto é a rede caso escape; o ano antigo pega
-    // o que a recência soft deixou passar.
     if (isExcludedHost(r.url) || hasStaleYearInUrl(r.url)) {
-      console.warn(`[firecrawl] host/ano descartado: ${r.url}`);
+      console.warn(`[${tag}] host/ano descartado: ${r.url}`);
       continue;
     }
-    // Descarta HOME/listagem: passam o filtro de markdown vazio (índice TEM
-    // texto), mas não são artigo. Sinais conservadores (URL de índice / muitos
-    // links) — ver lib/relevance.
-    if (isIndexPage(r.url, r.markdown)) {
-      console.warn(`[firecrawl] índice/listagem descartado: ${r.url}`);
+    if (isIndexPage(r.url, r.content)) {
+      console.warn(`[${tag}] índice/listagem descartado: ${r.url}`);
       continue;
     }
-    // Descarta fonte NÃO-portuguesa: espanhol vazava termos pro texto ("flota",
-    // "kilómetros"). Detecção por conteúdo (Firecrawl não tem filtro de idioma).
-    if (!isLikelyPortuguese(r.markdown)) {
-      console.warn(`[firecrawl] fonte não-portuguesa descartada: ${r.url}`);
+    if (!isLikelyPortuguese(r.content)) {
+      console.warn(`[${tag}] fonte não-portuguesa descartada: ${r.url}`);
       continue;
     }
-    // Descarta off-topic: o portão só via http+não-concorrente, então poliéster/
-    // portos passavam. Score de nicho pelo CONTEÚDO (folga grande: off-topic ~1,
-    // fonte boa 7-11).
-    if (!isOnNicheByContent(r.title, r.markdown)) {
+    if (!isOnNicheByContent(r.title, r.content)) {
       console.warn(
-        `[firecrawl] fora do nicho descartado (score=${nicheScore(`${r.title} ${r.markdown.slice(0, 6000)}`)}): ${r.url}`,
+        `[${tag}] fora do nicho descartado (score=${nicheScore(`${r.title} ${r.content.slice(0, 6000)}`)}): ${r.url}`,
       );
       continue;
     }
     const key = firecrawlDedupeKey(r.url);
     if (seen.has(key)) continue;
     seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
 
-    const textContent = r.markdown.slice(0, FIRECRAWL_MAX_TEXT_CHARS);
-    out.push({
+/**
+ * Aplica a régua única aos resultados do Firecrawl e devolve `ExtractedSource[]`
+ * (o mesmo shape que `generateDraft` consome), truncando o markdown ao teto.
+ */
+function filterFirecrawlSources(
+  results: FirecrawlSearchResult[],
+): ExtractedSource[] {
+  const kept = filterContentSources(
+    results.map((r) => ({ title: r.title, url: r.url, content: r.markdown })),
+    "firecrawl",
+  );
+  return kept.map((r) => {
+    const textContent = r.content.slice(0, FIRECRAWL_MAX_TEXT_CHARS);
+    return {
       title: r.title,
       url: r.url,
       excerpt: textContent.slice(0, 280).trim(),
       textContent,
-    });
-  }
+    };
+  });
+}
 
-  return out;
+/**
+ * PARIDADE do fallback: em vez de aceitar a escrita nativa do Sonar (que usou as
+ * citações SEM nosso filtro de conteúdo — idioma/relevância/índice), scrapeia as
+ * citações com o extrator próprio (linkedom, GRÁTIS — não gasta crédito Firecrawl),
+ * aplica a MESMA régua de conteúdo e reescreve com o nosso modelo. Fecha o buraco
+ * de idioma/relevância que o filtro só-por-URL do Sonar não pega.
+ *
+ * Custo medido: ~2s para scrapear as citações em paralelo. Devolve `null` (→ rede
+ * de segurança: usar o Sonar nativo) se sobrar MENOS de 1 fonte limpa — mesmo piso
+ * do Firecrawl (que escreve com ≥1 fonte que passa a régua), sem segunda régua.
+ * Best-effort: qualquer erro (site bloqueia bot, JS-heavy) vira `null`.
+ */
+export async function generateDraftFromSonarScrape(
+  citations: ResolvedSource[],
+  params: GenerateWithWebParams,
+): Promise<GenerateWithWebResult | null> {
+  if (citations.length === 0) return null;
+  try {
+    const settled = await Promise.allSettled(
+      citations.map((c) => extractFromUrl(c.url)),
+    );
+    const extracted = settled
+      .filter((s): s is PromiseFulfilledResult<ExtractedSource> => s.status === "fulfilled")
+      .map((s) => s.value);
+
+    const clean = filterContentSources(
+      extracted.map((e) => ({ title: e.title, url: e.url, content: e.textContent })),
+      "sonar-scrape",
+    );
+    // Rede de segurança: pouco (< 1) → null, o chamador usa o Sonar nativo.
+    if (clean.length < 1) {
+      console.warn(
+        `[sonar-scrape] só ${clean.length} fonte(s) limpa(s) de ${citations.length} citações; usando Sonar nativo`,
+      );
+      return null;
+    }
+
+    const sources: ExtractedSource[] = clean.map((e) => ({
+      title: e.title,
+      url: e.url,
+      excerpt: e.content.slice(0, 280).trim(),
+      textContent: e.content.slice(0, FIRECRAWL_MAX_TEXT_CHARS),
+    }));
+    // Escreve com o modelo de texto (mesma decisão do Firecrawl: nada de Sonar).
+    const writingModel =
+      params.model && !params.model.startsWith("perplexity/")
+        ? params.model
+        : undefined;
+    let { draft, model: usedModel } = await generateDraft({
+      theme: params.theme,
+      keywords: params.keywords,
+      sources,
+      model: writingModel,
+    });
+    // Retry por extensão (paridade com o Firecrawl) — sem re-scrapear.
+    if (params.retryOnShort && !checkArticleLength(draft.content).ok) {
+      const retry = await generateDraft({
+        theme: params.theme,
+        keywords: params.keywords,
+        sources,
+        model: writingModel,
+      });
+      if (retry.draft.content.length > draft.content.length) {
+        draft = retry.draft;
+        usedModel = retry.model;
+      }
+    }
+    return {
+      draft,
+      model: usedModel,
+      sources: sources.map((s) => ({ title: s.title, url: s.url })),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[sonar-scrape] falhou (usando Sonar nativo): ${msg}`);
+    return null;
+  }
 }
 
 /**
@@ -570,6 +680,7 @@ function buildWebUserPrompt(params: GenerateWithWebParams): string {
     parts.push(`Palavras-chave a considerar: ${keywords.join(", ")}`);
   }
 
+  parts.push(`\n${temporalContextLine()}`);
   parts.push(
     "\nBusque fontes reais e confiáveis na web sobre este tema e use-as como" +
       " ÚNICA base factual. Siga TODAS as regras — especialmente as REGRAS" +

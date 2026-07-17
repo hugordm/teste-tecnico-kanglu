@@ -4,6 +4,7 @@ import { generateUniqueSlug } from "@/lib/validation";
 import {
   generateDraftWithWebSearch,
   generateDraftWithFirecrawl,
+  generateDraftFromSonarScrape,
   checkArticleLength,
   type ArticleLength,
   AiError,
@@ -27,8 +28,21 @@ import type { ArticleWithSources } from "@/lib/publish";
 // nas ROTAS (config de rota), não aqui.
 // ---------------------------------------------------------------------------
 
-/** Qual caminho de busca produziu as fontes (instrumentação — item 2.2). */
-export type SearchEngineUsed = "firecrawl" | "sonar" | "sonar-fallback";
+/**
+ * Qual caminho REALMENTE produziu o artigo (instrumentação — sem isto não se sabe
+ * a qualidade que foi ao ar no dia):
+ *   - firecrawl     → busca+conteúdo do Firecrawl, nossa escrita (melhor).
+ *   - sonar         → painel escolheu Sonar nativo (busca+escrita da perplexity).
+ *   - sonar-scraped → fallback: Sonar buscou, MAS nós scrapeamos as citações e
+ *     reescrevemos (paridade de conteúdo com o Firecrawl).
+ *   - sonar-native  → fallback: scrape rendeu pouco, usamos a escrita nativa do
+ *     Sonar (rede de segurança — o caminho que menos filtra).
+ */
+export type SearchEngineUsed =
+  | "firecrawl"
+  | "sonar"
+  | "sonar-scraped"
+  | "sonar-native";
 
 /** O que fazer quando o rascunho vem abaixo do piso de extensão. */
 export type ShortPolicy = "reject" | "keepDraft";
@@ -173,16 +187,32 @@ export async function generateAutoArticle(
           );
           return { ok: false, reason: "budget_exceeded" };
         }
-        // Fallback SEMPRE no Sonar (env WEB_SEARCH_MODEL), sem passar o modelo
-        // escritor: ele pode ser um "lite" que não busca bem. O Sonar é a rede.
-        // `recent` aqui aplica o search_recency_filter=year do Sonar.
-        engine = "sonar-fallback";
-        result = await generateDraftWithWebSearch({
+        // Fallback no Sonar (busca+escrita nativa; `recent` aplica search_recency
+        // _filter=year). Isso dá o rascunho de SEGURANÇA + as citações filtradas.
+        const sonar = await generateDraftWithWebSearch({
           theme,
           keywords,
           recent,
           retryOnShort,
         });
+        // PARIDADE (só no cron/`recent`): scrapeia as citações (grátis) e reescreve
+        // com a mesma régua de conteúdo do Firecrawl. Se render pouco, `null` → cai
+        // na rede de segurança (a escrita nativa do Sonar acima).
+        const scraped = recent
+          ? await generateDraftFromSonarScrape(sonar.sources, {
+              theme,
+              keywords,
+              recent,
+              retryOnShort,
+            })
+          : null;
+        if (scraped) {
+          engine = "sonar-scraped";
+          result = scraped;
+        } else {
+          engine = "sonar-native";
+          result = sonar;
+        }
       }
     }
   } catch (err) {
