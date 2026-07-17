@@ -16,6 +16,7 @@ import {
   isLikelyPortuguese,
   isExcludedHost,
   hasStaleYearInUrl,
+  isNonEditorialUrl,
   hasNicheSignal,
   nicheScore,
 } from "@/lib/relevance";
@@ -505,6 +506,10 @@ function filterContentSources<T extends RawContentSource>(
       console.warn(`[${tag}] host/ano descartado: ${r.url}`);
       continue;
     }
+    if (isNonEditorialUrl(r.url)) {
+      console.warn(`[${tag}] não-editorial (linkedin pulse/posts) descartado: ${r.url}`);
+      continue;
+    }
     if (isIndexPage(r.url, r.content)) {
       console.warn(`[${tag}] índice/listagem descartado: ${r.url}`);
       continue;
@@ -641,6 +646,10 @@ function filterSonarSources(sources: ResolvedSource[]): ResolvedSource[] {
   return sources.filter((s) => {
     if (isExcludedHost(s.url) || hasStaleYearInUrl(s.url)) {
       console.warn(`[sonar] host/ano descartado: ${s.url}`);
+      return false;
+    }
+    if (isNonEditorialUrl(s.url)) {
+      console.warn(`[sonar] não-editorial (linkedin pulse/posts) descartado: ${s.url}`);
       return false;
     }
     if (isIndexPage(s.url, "")) {

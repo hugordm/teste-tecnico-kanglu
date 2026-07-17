@@ -13,7 +13,7 @@
 // exato e qualquer subdomínio dele (ex.: "blog.melhorenvio.com.br").
 
 export const COMPETITOR_DOMAINS: string[] = [
-  // Gestão de fretes / etiquetas
+  // Gestão de fretes / etiquetas / rastreamento
   "melhorenvio.com.br",
   "frenet.com.br",
   "intelipost.com.br",
@@ -21,6 +21,11 @@ export const COMPETITOR_DOMAINS: string[] = [
   "smartenvios.com",
   "smartenvios.com.br",
   "kangu.com.br",
+  "freterapido.com",
+  "freterapido.com.br",
+  "mandae.com.br",
+  "muambator.com.br",
+  "17track.net",
 
   // ERPs / plataformas com rastreio
   "bling.com.br",
@@ -50,6 +55,13 @@ export const COMPETITOR_DOMAINS: string[] = [
   "mercadopago.com.br",
   "mercadopago.com",
   "pagar.me",
+  "cielo.com.br",
+  "userede.com.br",
+  "getnet.com.br",
+  "ebanx.com",
+  "vindi.com.br",
+  "appmax.com.br",
+  "yapay.com.br",
 
   // E-commerce / lojas / marketplaces
   "shopify.com",
@@ -63,6 +75,17 @@ export const COMPETITOR_DOMAINS: string[] = [
   "sweda.com.br",
   "caravel.com.br",
   "quatrocor.com.br",
+  "linxcommerce.com.br",
+  "climba.com.br",
+  "lojaintegrada.com.br",
+  "yampi.com.br",
+  "dooca.store",
+  "bagy.com.br",
+  "irroba.com.br",
+  "jetecommerce.com.br",
+  "magazord.com.br",
+  "cartpanda.com",
+  "wbuy.com.br",
 
   // Vídeo / redes (não é fonte adequada para artigo)
   "youtube.com",

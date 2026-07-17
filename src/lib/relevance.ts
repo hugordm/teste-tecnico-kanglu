@@ -134,6 +134,27 @@ export function isExcludedHost(url: string): boolean {
 }
 
 /**
+ * Conteúdo NÃO-editorial em domínio que a gente preserva. Hoje: LinkedIn `/pulse/`
+ * (artigo aberto — qualquer um publica) e `/posts/` (status curto). Mantemos o
+ * LinkedIn de fora das exclusões de host (às vezes traz veículo real do setor),
+ * mas o que distingue fonte de opinião é a curadoria editorial — e /pulse//posts/
+ * não têm. Filtro por PATH (host permitido, caminho barrado), reversível.
+ */
+export function isNonEditorialUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "linkedin.com" || host.endsWith(".linkedin.com")) {
+      const p = u.pathname.toLowerCase();
+      return p.startsWith("/pulse/") || p.startsWith("/posts/");
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
  * A URL denuncia conteúdo ANTIGO — um ano de 2000 até (ano atual − 2) aparece
  * como número isolado no endereço (ex.: `.../segundo-semestre-de-2021/`). É a
  * rede que faltava no fallback: a recência do Sonar (`search_recency_filter`) é
