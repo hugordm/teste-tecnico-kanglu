@@ -193,11 +193,23 @@ export async function getPublishedArticlesForChat(): Promise<
  * usa) — uma query leve e sob medida.
  */
 export async function getPublishedArticlesForSitemap(): Promise<
-  { slug: string; updatedAt: Date }[]
+  {
+    slug: string;
+    updatedAt: Date;
+    publishedAt: Date | null;
+    publishAt: Date | null;
+  }[]
 > {
   return prisma.article.findMany({
     where: publicWhere(),
     orderBy: { publishedAt: "desc" },
-    select: { slug: true, updatedAt: true },
+    // publishedAt + publishAt entram porque o lastmod precisa da data em que o
+    // artigo ficou PÚBLICO (via publicPublishedAt), não só do updatedAt.
+    select: {
+      slug: true,
+      updatedAt: true,
+      publishedAt: true,
+      publishAt: true,
+    },
   });
 }

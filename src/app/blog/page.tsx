@@ -7,6 +7,7 @@ import {
   getPublishedCategorySlugs,
   type PublicArticle,
 } from "@/lib/public-articles";
+import { publicPublishedAt } from "@/lib/article-date";
 import { SITE_URL } from "@/lib/site";
 import {
   CATEGORIES,
@@ -68,7 +69,7 @@ export const revalidate = 60;
 const PAGE_SIZE = 6;
 
 // Formata datas em pt-BR ("11 de julho de 2026"). Criado uma vez no módulo
-// em vez de a cada card. publishedAt é opcional no schema; tratamos null.
+// em vez de a cada card. A data pode ser null (artigo sem publicação); tratamos.
 const dateFmt = new Intl.DateTimeFormat("pt-BR", {
   day: "numeric",
   month: "long",
@@ -326,6 +327,10 @@ function NoResults({ query }: { query: string }) {
 /** Um card de artigo na listagem. Elemento <article> por ser conteúdo autônomo. */
 function ArticleCard({ article }: { article: PublicArticle }) {
   const catLabel = categoryLabel(article.category);
+  // Data que o card exibe: a em que o artigo FICOU PÚBLICO, não a da aprovação.
+  // Para o artigo agendado pelo cron isso é o publishAt (o dia seguinte), não o
+  // publishedAt (o dia da geração). Mesmo helper do cabeçalho/JSON-LD/sitemap.
+  const publishedOn = publicPublishedAt(article);
   return (
     <article className="group relative flex flex-col rounded-xl border border-kanglu-nude bg-white p-6 transition-colors hover:border-kanglu-orange">
       {/* Badge da categoria. `relative z-10` fica ACIMA do overlay do título
@@ -354,12 +359,12 @@ function ArticleCard({ article }: { article: PublicArticle }) {
         </p>
       )}
 
-      {article.publishedAt && (
+      {publishedOn && (
         <time
-          dateTime={article.publishedAt.toISOString()}
+          dateTime={publishedOn.toISOString()}
           className="mt-4 text-sm text-kanglu-bordo/50"
         >
-          {dateFmt.format(article.publishedAt)}
+          {dateFmt.format(publishedOn)}
         </time>
       )}
 

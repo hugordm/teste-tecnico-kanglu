@@ -9,6 +9,7 @@ import {
   getPublishedArticleBySlug,
   type PublicArticle,
 } from "@/lib/public-articles";
+import { publicPublishedAt } from "@/lib/article-date";
 import { extractHeadings } from "@/lib/toc";
 import { SITE_URL } from "@/lib/site";
 import { categoryLabel } from "@/lib/categories";
@@ -47,6 +48,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // própria URL pública do artigo. Mesma base/regra do JSON-LD e do sitemap.
   const canonical = article.canonicalUrl ?? `${SITE_URL}/blog/${article.slug}`;
 
+  // og:published_time — a MESMA data do JSON-LD e do que a página exibe: quando
+  // o artigo ficou público. Só entra quando existe (artigo publicado).
+  const publishedOn = publicPublishedAt(article);
+
   return {
     title,
     description,
@@ -54,6 +59,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description,
       type: "article",
+      ...(publishedOn ? { publishedTime: publishedOn.toISOString() } : {}),
       ...(article.ogImage ? { images: [article.ogImage] } : {}),
     },
     alternates: { canonical },
@@ -70,16 +76,24 @@ function buildBlogPostingLd(article: PublicArticle) {
   // mainEntityOfPage é a URL canônica do artigo: a canonicalUrl explícita, se
   // houver; senão a própria URL pública em /blog/{slug}.
   const canonical = article.canonicalUrl ?? `${SITE_URL}/blog/${article.slug}`;
+  const publishedOn = publicPublishedAt(article);
 
   return {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
     headline: article.title,
     description: article.metaDescription ?? article.excerpt ?? undefined,
-    ...(article.publishedAt
-      ? { datePublished: article.publishedAt.toISOString() }
-      : {}),
-    dateModified: article.updatedAt.toISOString(),
+    // datePublished = data em que o artigo ficou público (publishAt do
+    // agendado). Usar o publishedAt cru anunciava ao Google um dia em que a URL
+    // ainda respondia 404 — e diverge do que a página mostra ao leitor.
+    ...(publishedOn ? { datePublished: publishedOn.toISOString() } : {}),
+    // dateModified nunca pode ser ANTERIOR a datePublished (schema inválido), e
+    // no artigo agendado é exatamente o que aconteceria: o último update é do
+    // dia da geração, um dia antes de ficar público. Por isso o máximo dos dois.
+    dateModified: (publishedOn && publishedOn > article.updatedAt
+      ? publishedOn
+      : article.updatedAt
+    ).toISOString(),
     author: { "@type": "Organization", name: "Kanglu" },
     mainEntityOfPage: canonical,
     ...(article.ogImage ? { image: article.ogImage } : {}),
@@ -172,7 +186,7 @@ export default async function ArticlePage({ params }: Props) {
             ogImage={article.ogImage}
             imageCredit={article.imageCredit}
             imageSourceUrl={article.imageSourceUrl}
-            publishedAt={article.publishedAt}
+            publishedOn={publicPublishedAt(article)}
             tocInline="mobileOnly"
           />
 

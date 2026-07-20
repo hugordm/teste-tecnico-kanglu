@@ -24,7 +24,7 @@ export function ArticleBody({
   ogImage,
   imageCredit,
   imageSourceUrl,
-  publishedAt,
+  publishedOn,
   tocInline = "always",
 }: {
   title: string;
@@ -32,7 +32,13 @@ export function ArticleBody({
   ogImage?: string | null;
   imageCredit?: string | null;
   imageSourceUrl?: string | null;
-  publishedAt?: Date | null;
+  /**
+   * Data em que o artigo ficou PÚBLICO — já resolvida pelo chamador via
+   * `publicPublishedAt()` (publishAt do agendado, publishedAt do imediato).
+   * Não é o campo cru `publishedAt` de propósito: o cabeçalho tem que bater com
+   * o card da listagem, o JSON-LD e o og:published_time.
+   */
+  publishedOn?: Date | null;
   // Onde o índice inline (no topo do corpo) aparece:
   // - "always": sempre (mobile/tablet e prévia do editor).
   // - "mobileOnly": some no desktop (lg+), onde a página do artigo mostra o
@@ -52,13 +58,13 @@ export function ArticleBody({
   return (
     <>
       {/* Cabeçalho meta: data (quando houver) · tempo de leitura. Discreto, no
-          mesmo tom da data. A data só entra quando `publishedAt` é passado (blog
+          mesmo tom da data. A data só entra quando `publishedOn` é passado (blog
           público); na prévia, que não tem data, mostra só o tempo de leitura. */}
       <p className="mt-3 text-sm text-kanglu-bordo/50">
-        {publishedAt && (
+        {publishedOn && (
           <>
-            <time dateTime={publishedAt.toISOString()}>
-              {dateFmt.format(publishedAt)}
+            <time dateTime={publishedOn.toISOString()}>
+              {dateFmt.format(publishedOn)}
             </time>
             {" · "}
           </>

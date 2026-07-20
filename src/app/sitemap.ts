@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/site";
 import { getPublishedArticlesForSitemap } from "@/lib/public-articles";
+import { publicPublishedAt } from "@/lib/article-date";
 
 // Sem isto o Next congela o sitemap no build (a query ao banco não é uma
 // request-time API, então ele prerenderiza estático). Como artigos são
@@ -13,15 +14,23 @@ export const dynamic = "force-dynamic";
 // com o que está publicado (sem precisar rebuild a cada artigo).
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Só artigos publicados entram — rascunho/em revisão jamais (filtro reusado
-  // do helper). Cada um vira /blog/{slug} com lastModified = updatedAt.
+  // do helper). Cada um vira /blog/{slug} com lastModified.
   const articles = await getPublishedArticlesForSitemap();
 
-  const articleEntries: MetadataRoute.Sitemap = articles.map((a) => ({
-    url: `${SITE_URL}/blog/${a.slug}`,
-    lastModified: a.updatedAt,
-    changeFrequency: "monthly",
-    priority: 0.7,
-  }));
+  // lastmod = a data mais recente entre "ficou público" e "última edição". No
+  // artigo agendado o updatedAt sozinho ficaria ANTES da URL sequer existir
+  // (editado em 17/07, público só em 18/07) — anunciar isso ao crawler é
+  // errado. Nos demais casos o updatedAt continua mandando, como antes.
+  const articleEntries: MetadataRoute.Sitemap = articles.map((a) => {
+    const publishedOn = publicPublishedAt(a);
+    return {
+      url: `${SITE_URL}/blog/${a.slug}`,
+      lastModified:
+        publishedOn && publishedOn > a.updatedAt ? publishedOn : a.updatedAt,
+      changeFrequency: "monthly",
+      priority: 0.7,
+    };
+  });
 
   // Rotas estáticas públicas. A home e a listagem do blog.
   const staticEntries: MetadataRoute.Sitemap = [

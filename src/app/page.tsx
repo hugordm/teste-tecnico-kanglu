@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { SITE_URL } from "@/lib/site";
 import { getPublishedArticles, type PublicArticle } from "@/lib/public-articles";
+import { publicPublishedAt } from "@/lib/article-date";
 
 // Canônica da home — mesma base do sitemap/JSON-LD. `${SITE_URL}/` casa com a
 // entrada da home no sitemap.
@@ -225,6 +226,8 @@ function LatestArticles({ articles }: { articles: PublicArticle[] }) {
 
 /** Card de artigo na home: capa (ou fallback), título, excerpt e data. */
 function HomeArticleCard({ article }: { article: PublicArticle }) {
+  // Mesma data do card do /blog: quando o artigo ficou público (ver helper).
+  const publishedOn = publicPublishedAt(article);
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-xl border border-kanglu-nude bg-white transition-colors hover:border-kanglu-orange">
       <div className="aspect-[16/9] w-full overflow-hidden bg-kanglu-cream">
@@ -261,12 +264,12 @@ function HomeArticleCard({ article }: { article: PublicArticle }) {
           </p>
         )}
 
-        {article.publishedAt && (
+        {publishedOn && (
           <time
-            dateTime={article.publishedAt.toISOString()}
+            dateTime={publishedOn.toISOString()}
             className="mt-4 text-xs text-kanglu-bordo/50"
           >
-            {dateFmt.format(article.publishedAt)}
+            {dateFmt.format(publishedOn)}
           </time>
         )}
       </div>
