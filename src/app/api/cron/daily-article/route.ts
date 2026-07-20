@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { suggestIdeas, IdeasError } from "@/lib/ideas";
+import { pickFreshIdea } from "@/lib/theme-overlap";
 import { generateAutoArticle } from "@/lib/generate-article";
 import { publishArticle } from "@/lib/publish";
 
@@ -12,6 +13,42 @@ export const maxDuration = 60;
 
 /** Marca que identifica os artigos nascidos deste cron (idempotência + badge futuro). */
 const CREATED_VIA = "cron-daily";
+
+/**
+ * Quantos títulos do histórico entram no prompt e no pós-filtro.
+ * 20 ≈ 3 semanas de cron diário — o suficiente para pegar a repetição que
+ * importa (a de dias próximos) sem inflar o prompt: medido, ~390 tokens de
+ * input a mais na chamada MAIS BARATA do pipeline.
+ */
+const RECENT_TITLES_COUNT = 20;
+
+/**
+ * Os títulos que já ocupam o blog, para não repetir a pauta.
+ *
+ * O filtro é `status: published` OU rascunho nascido do cron:
+ *   - `published` cobre publicado E agendado de uma vez (agendado = published
+ *     com publishAt futuro), que é exatamente o pedido;
+ *   - o rascunho `cron-daily` entra porque o `shortPolicy: "keepDraft"` deixa
+ *     rascunho quando o texto sai curto. Sem contá-lo, o tema que FALHOU
+ *     ontem seria sorteado de novo hoje — a repetição mais irritante das duas.
+ *
+ * Ordena por createdAt desc: é quando a pauta foi USADA, que é o que interessa
+ * aqui (publishAt/publishedAt diriam quando foi ao ar).
+ *
+ * Uma query só, com a conexão já quente da checagem de idempotência acima:
+ * ~200ms medidos, contra um teto de 60s do handler.
+ */
+async function recentThemeTitles(): Promise<string[]> {
+  const rows = await prisma.article.findMany({
+    where: {
+      OR: [{ status: "published" }, { createdVia: CREATED_VIA }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: RECENT_TITLES_COUNT,
+    select: { title: true },
+  });
+  return rows.map((r) => r.title);
+}
 
 /**
  * Orçamento (ms desde o início do handler) até o qual ainda vale INICIAR o
@@ -94,17 +131,47 @@ export async function GET(req: Request) {
   }
 
   // 3a) Pauta do dia -------------------------------------------------------
-  // Pede algumas e usa a primeira; a temperatura alta do suggestIdeas dá variação
-  // dia a dia. `recent: true` ancora a pauta no momento atual (injeta a data de
-  // hoje) — o pedido central da cliente: conteúdo ATUAL, não atemporal. Falha da
-  // IA aqui vira 502 amigável — nada é criado.
+  // Pede algumas e escolhe a primeira que não repete o histórico; a temperatura
+  // alta do suggestIdeas dá variação dia a dia. `recent: true` ancora a pauta no
+  // momento atual (injeta a data de hoje) — o pedido central da cliente:
+  // conteúdo ATUAL, não atemporal. Falha da IA aqui vira 502 amigável — nada é
+  // criado.
+  //
+  // ANTIRREPETIÇÃO, em duas camadas (a idempotência do slot impede dois artigos
+  // no mesmo dia, mas nada impedia a mesma PAUTA voltar em dias diferentes):
+  //   1. o histórico entra no prompt, pedindo ângulo novo (lib/ideas);
+  //   2. o pós-filtro determinístico escolhe entre as 5 candidatas que já vieram
+  //      na resposta (lib/theme-overlap) — sem chamada extra à IA.
+  // A camada 2 é a que garante: prompt é pedido, não contrato.
+  const recentTitles = await recentThemeTitles();
+
   let theme: string;
+  let themeRepeat = false;
+  let themeOverlap = 0;
   const pautaStart = Date.now();
   try {
-    const { ideas } = await suggestIdeas({ count: 5, recent: true });
-    // O cron usa só o TÍTULO da 1ª pauta como tema (as keywords novas são para o
-    // painel; aqui não passamos keywords — o fluxo do cron segue idêntico).
-    theme = ideas[0].title;
+    const { ideas } = await suggestIdeas({
+      count: 5,
+      recent: true,
+      avoidTitles: recentTitles,
+    });
+    // O cron usa só o TÍTULO da pauta escolhida como tema (as keywords são para
+    // o painel; aqui não passamos keywords — o fluxo segue idêntico).
+    const pick = pickFreshIdea(ideas, recentTitles);
+    if (!pick) throw new IdeasError("Nenhuma pauta aproveitável");
+    theme = pick.idea.title;
+    themeRepeat = pick.repeat;
+    themeOverlap = pick.overlap;
+    if (themeRepeat) {
+      // TODAS as 5 candidatas bateram no limiar. Publicar um tema próximo é
+      // melhor que ficar sem artigo do dia, então seguimos com a MENOS parecida
+      // — mas o dia fica marcado (diag.themeRepeat) para a revisão humana da
+      // noite decidir se vale editar ou vetar.
+      console.warn(
+        `[cron] todas as pautas repetem o histórico; usando a de menor ` +
+          `sobreposição (${themeOverlap.toFixed(2)}): "${theme}"`,
+      );
+    }
   } catch (err) {
     const msg = err instanceof IdeasError ? err.message : String(err);
     console.warn(`[cron] sugestão de pauta falhou: ${msg}`);
@@ -150,6 +217,14 @@ export async function GET(req: Request) {
   const diag = {
     engine: outcome.engine,
     sourceCount: outcome.sourceCount,
+    // Antirrepetição: `themeRepeat: true` = TODAS as pautas do dia colidiram com
+    // o histórico e o cron seguiu com a menos parecida (tema forçado). É o sinal
+    // para a revisão humana olhar esse artigo com mais atenção. `themeOverlap` é
+    // a sobreposição da pauta escolhida (0–1) — útil mesmo quando não houve
+    // repetição, para ver de longe se o modelo está começando a convergir.
+    themeRepeat,
+    themeOverlap: Number(themeOverlap.toFixed(2)),
+    historyTitles: recentTitles.length,
     words: outcome.length.words,
     sections: outcome.length.sections,
     ms: {
@@ -196,7 +271,8 @@ export async function GET(req: Request) {
 
   console.info(
     `[cron] artigo do dia publicado: ${result.article.slug} ` +
-      `(engine=${diag.engine} sources=${diag.sourceCount} words=${diag.words})`,
+      `(engine=${diag.engine} sources=${diag.sourceCount} words=${diag.words}` +
+      `${diag.themeRepeat ? " TEMA-FORÇADO" : ""})`,
   );
   return Response.json({
     published: true,

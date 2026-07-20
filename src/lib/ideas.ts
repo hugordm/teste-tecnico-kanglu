@@ -75,6 +75,7 @@ function buildUserPrompt(
   count: number,
   theme?: string,
   recent?: boolean,
+  avoidTitles?: string[],
 ): string {
   const parts = [`Sugira ${count} títulos de artigos de blog.`];
   if (theme) {
@@ -91,6 +92,26 @@ function buildUserPrompt(
       `Hoje é ${todayLongPtBr()}. Priorize pautas ancoradas no MOMENTO ATUAL: tendências recentes, sazonalidade do período (datas do varejo, época do ano) e o que é relevante AGORA para lojistas — evite temas puramente atemporais/genéricos. Não invente fatos nem números; a atualidade deve estar no ângulo da pauta, não em estatísticas inventadas.`,
     );
   }
+  // Histórico: o modelo não tem memória entre execuções, então sem esta lista
+  // ele converge para as mesmas pautas "óbvias" do nicho dia após dia.
+  //
+  // A instrução pede ÂNGULO diferente, não assunto proibido — de propósito. Com
+  // `recent` ligado já mandamos priorizar a sazonalidade do período, e é
+  // justamente isso que faz todo mundo cair em "segundo semestre". Se aqui
+  // proibíssemos o assunto, as duas instruções se contradiriam e o modelo
+  // obedeceria uma das duas ao acaso. Pedir um recorte novo sobre o mesmo
+  // momento mantém as duas compatíveis.
+  //
+  // Isto REDUZ a repetição; quem GARANTE é o pós-filtro determinístico do cron
+  // (lib/theme-overlap) — prompt é pedido, não contrato.
+  if (avoidTitles && avoidTitles.length > 0) {
+    parts.push(
+      `O blog JÁ PUBLICOU (ou já tem agendados) os artigos abaixo. NÃO sugira pautas que sejam o mesmo artigo com outras palavras — nem o mesmo assunto com sinônimos no título. Se o tema for próximo de algum deles, mude o ÂNGULO (outro recorte, outro público, outra etapa do processo) ou escolha outro assunto do nicho:\n${avoidTitles
+        .map((t) => `- ${t}`)
+        .join("\n")}`,
+    );
+  }
+
   parts.push("Responda apenas com o JSON no formato pedido.");
   return parts.join("\n");
 }
@@ -116,6 +137,14 @@ export interface SuggestIdeasParams {
    * Ancora as pautas no momento atual (injeta a data de hoje + pede atualidade).
    * O cron diário liga isto; o painel de pautas deixa desligado (default). */
   recent?: boolean;
+  /**
+   * Títulos que o blog já tem (publicados ou agendados) para o modelo NÃO
+   * repetir. Vazio/ausente = sem histórico no prompt, comportamento de antes.
+   *
+   * Só o cron passa isto hoje; o painel segue sem histórico — lá quem filtra é
+   * o humano, que vê a lista de artigos na tela ao lado.
+   */
+  avoidTitles?: string[];
 }
 
 export interface SuggestIdeasResult {
@@ -155,7 +184,15 @@ export async function suggestIdeas(
         model: IDEAS_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildUserPrompt(count, theme, params.recent) },
+          {
+            role: "user",
+            content: buildUserPrompt(
+              count,
+              theme,
+              params.recent,
+              params.avoidTitles,
+            ),
+          },
         ],
         // Pede objeto JSON quando o provedor suporta; se ignorar, a extração
         // defensiva ainda limpa cercas e valida o shape.
