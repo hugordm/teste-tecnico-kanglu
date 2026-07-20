@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { CATEGORY_SLUGS } from "@/lib/categories";
+import { isPastSchedule, PUBLISH_AT_PAST_MESSAGE } from "@/lib/schedule";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,7 +100,19 @@ export const createArticleInput = z.object({
 
   // Agendamento: data/hora a partir da qual o artigo publicado aparece no blog.
   // Chega como ISO (UTC) do client; coerce.date() a converte em Date.
-  publishAt: z.coerce.date().nullable().optional(),
+  //
+  // Não pode estar no passado. Aqui a regra é simples porque o artigo está
+  // NASCENDO: não há agendamento anterior para preservar, então todo valor é um
+  // agendamento novo. O `new Date()` roda dentro do refine, ou seja, no parse do
+  // REQUEST — é o "agora" do servidor naquele instante, não do build nem do
+  // carregamento da tela. (No PATCH a regra é outra; ver a rota.)
+  publishAt: z.coerce
+    .date()
+    .nullable()
+    .optional()
+    .refine((d) => !d || !isPastSchedule(d, new Date()), {
+      message: PUBLISH_AT_PAST_MESSAGE,
+    }),
 
   sources: z.array(sourceInput).optional(),
 });
@@ -133,6 +146,12 @@ export const updateArticleInput = z
 
     // Agendamento (ver createArticleInput). null limpa o agendamento (volta a
     // aparecer assim que publicado). Ausência do campo o mantém como está.
+    //
+    // SEM refine de "não pode ser passado" aqui, de propósito: o schema não
+    // enxerga o valor GRAVADO, e a trava só vale para um agendamento NOVO —
+    // reenviar o publishAt já existente (que no artigo do cron é passado assim
+    // que dá 09:00) tem que continuar salvando. A checagem mora na rota PATCH,
+    // que tem os dois lados para comparar.
     publishAt: z.coerce.date().nullable().optional(),
 
     sources: z.array(sourceInput).optional(),

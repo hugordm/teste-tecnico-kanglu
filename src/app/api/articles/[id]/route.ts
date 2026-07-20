@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 import { updateArticleInput, slugify } from "@/lib/validation";
+import {
+  isPastSchedule,
+  isScheduleChanged,
+  PUBLISH_AT_PAST_MESSAGE,
+} from "@/lib/schedule";
 import { deleteArticleImages } from "@/lib/article-image";
 import { z } from "zod";
 
@@ -62,6 +67,20 @@ export async function PATCH(req: Request, { params }: Params) {
   const existing = await prisma.article.findUnique({ where: { id } });
   if (!existing) {
     return Response.json({ error: "Artigo não encontrado" }, { status: 404 });
+  }
+
+  // Agendamento no passado: bloqueado, mas SÓ quando é um agendamento novo.
+  // A comparação é contra o valor gravado e usa o "agora" DESTE request — não
+  // um instante capturado no carregamento da tela (uma aba aberta desde ontem
+  // validaria contra ontem). Reenviar o mesmo publishAt já salvo passa direto:
+  // é o caso de todo artigo do cron depois das 09:00, que precisa continuar
+  // editável nos demais campos. Ver isPastSchedule/isScheduleChanged.
+  if (
+    parsed.data.publishAt != null &&
+    isScheduleChanged(parsed.data.publishAt, existing.publishAt) &&
+    isPastSchedule(parsed.data.publishAt, new Date())
+  ) {
+    return Response.json({ error: PUBLISH_AT_PAST_MESSAGE }, { status: 400 });
   }
 
   const { sources, title, ...rest } = parsed.data;

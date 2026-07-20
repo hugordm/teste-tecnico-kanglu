@@ -16,6 +16,11 @@ import {
 } from "../../_components/loading-messages";
 import { IMAGE_MARKER, imageMarker } from "@/lib/body-images";
 import {
+  isPastSchedule,
+  isScheduleChanged,
+  PUBLISH_AT_PAST_MESSAGE,
+} from "@/lib/schedule";
+import {
   CATEGORIES,
   normalizeCategory,
   type CategorySlug,
@@ -56,6 +61,15 @@ function isoToLocalInput(iso: string | null): string {
 // Valor do datetime-local (horário LOCAL, sem fuso) -> ISO em UTC para gravar.
 // `new Date("2026-07-12T14:30")` é interpretado como hora local pelo runtime,
 // e toISOString() a normaliza para UTC — o fuso é resolvido aqui, uma vez.
+// ISO (ou null) -> Date (ou null), para comparar agendamentos por instante.
+// Data inválida vira null: melhor tratar como "sem agendamento anterior" do que
+// propagar um NaN para dentro da comparação.
+function toDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function localInputToIso(local: string): string | null {
   const v = local.trim();
   if (v === "") return null;
@@ -153,6 +167,21 @@ export default function EditorPage() {
       toast.error("Há fonte com URL inválida (use http/https).");
       return null;
     }
+    // Agendamento no passado — MESMA regra do servidor (isPastSchedule +
+    // isScheduleChanged em lib/validation), aqui só para dar erro na hora em vez
+    // de um 400. Vale exclusivamente para um agendamento NOVO: um artigo que já
+    // guarda uma data passada (todo artigo do cron depois das 09:00) reenvia o
+    // mesmo valor e continua salvando normalmente.
+    const nextPublishAt = localInputToIso(form.publishAt);
+    if (
+      nextPublishAt !== null &&
+      isScheduleChanged(new Date(nextPublishAt), toDate(article?.publishAt)) &&
+      isPastSchedule(new Date(nextPublishAt), new Date())
+    ) {
+      toast.error(PUBLISH_AT_PAST_MESSAGE);
+      return null;
+    }
+
     const cleanSources = sources
       .filter((s) => s.title.trim() !== "" && s.url.trim() !== "")
       .map((s) => ({ title: s.title.trim(), url: s.url.trim() }));
@@ -167,7 +196,7 @@ export default function EditorPage() {
       ogImage: toNull(form.ogImage),
       category: form.category || null, // "" → null (limpa a categoria)
       status: form.workflowStatus,
-      publishAt: localInputToIso(form.publishAt),
+      publishAt: nextPublishAt,
       sources: cleanSources,
     };
   }
@@ -559,6 +588,7 @@ export default function EditorPage() {
                   id="publishAt"
                   value={form.publishAt}
                   onChange={(v) => set("publishAt", v)}
+                  disablePast
                 />
                 <p className="mt-1 text-xs text-kanglu-bordo/50">
                   Deixe vazio para publicar imediatamente. Com uma data futura, ao
