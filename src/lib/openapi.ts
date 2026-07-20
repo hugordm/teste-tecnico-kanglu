@@ -102,6 +102,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
       { name: "Artigos", description: "CRUD de artigos e portão de publicação (admin)." },
       { name: "Geração (IA)", description: "Geração de texto/imagem e lista de modelos (admin)." },
       { name: "Utilidades (IA)", description: "Sugestão de pautas (admin) e chatbot público." },
+      { name: "Automação (cron)", description: "Publicação diária automática (Vercel Cron)." },
       { name: "Blog público", description: "Páginas públicas (retornam HTML/XML)." },
     ],
     components: {
@@ -113,6 +114,17 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           description:
             "JWT `httpOnly` emitido por `POST /api/auth/login`. O navegador o " +
             "envia automaticamente nas requisições de mesma origem.",
+        },
+        // O cron NÃO usa o cookie do admin: quem o aciona é a Vercel, sem
+        // sessão. A autenticação é um Bearer com o valor da env CRON_SECRET,
+        // que a Vercel injeta no header ao disparar o agendamento.
+        cronBearer: {
+          type: "http",
+          scheme: "bearer",
+          description:
+            "`Authorization: Bearer <CRON_SECRET>`. A Vercel injeta este header " +
+            "ao acionar o cron. Sem a env `CRON_SECRET` configurada, a rota " +
+            "recusa TUDO (responde `500`) em vez de ficar aberta.",
         },
       },
     },
@@ -167,7 +179,9 @@ export function buildOpenApiDocument(): Record<string, unknown> {
           summary: "Cria um artigo (manual)",
           description:
             "Cria sempre como `draft` (o status não é aceito aqui). Aceita " +
-            "`category` (slug da lista fixa) e fontes aninhadas.",
+            "`category` (slug da lista fixa) e fontes aninhadas. `publishAt` no " +
+            "passado é recusado com `400` — na criação não há valor anterior a " +
+            "preservar, então todo agendamento é novo e precisa ser futuro.",
           security: ADMIN_SECURITY,
           requestBody: jsonBody(createArticleInput),
           responses: {
@@ -198,12 +212,21 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "Atualização parcial. `status` aceita apenas `draft`/`in_review`/" +
             "`archived` — NUNCA `published` (publicar é só via `/publish`). " +
             "`sources`, se enviadas, substituem o conjunto atual. Aceita " +
-            "`publishAt` (agendamento, ISO 8601), `category` e a seleção de capa.",
+            "`publishAt` (agendamento, ISO 8601), `category` e a seleção de capa. " +
+            "**Agendamento no passado é recusado com `400`**, mas SÓ quando o " +
+            "valor MUDA: reenviar o `publishAt` já gravado (o caso de todo " +
+            "artigo do cron depois das 09:00) continua salvando normalmente, " +
+            "senão a trava impediria editar qualquer artigo antigo. A " +
+            "comparação usa o instante do request, com 60s de tolerância para " +
+            "a granularidade de minuto do seletor.",
           security: ADMIN_SECURITY,
           requestBody: jsonBody(updateArticleInput),
           responses: {
             "200": jsonResponse("Artigo atualizado."),
-            "400": jsonResponse("Dados malformados (inclui tentativa de setar `published`)."),
+            "400": jsonResponse(
+              "Dados malformados (inclui tentativa de setar `published`) ou " +
+                "novo `publishAt` no passado.",
+            ),
             "401": ERR.unauthorized,
             "404": ERR.notFound,
           },
@@ -297,7 +320,15 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             "escreve) ou `sonar` (busca+escreve nativo). Se o Firecrawl falhar " +
             "ou não achar fonte, cai automaticamente no Sonar (fallback). " +
             "`textModel` é validado conforme o motor (Firecrawl aceita qualquer " +
-            "modelo; Sonar só robustos). Também sugere `category` e gera 4 capas.",
+            "modelo; Sonar só robustos). Também sugere `category` e gera 4 capas. " +
+            "`recent` (booleano, **default `false`**) é o MESMO parâmetro que o " +
+            "cron liga fixo: preferência por conteúdo recente — `sbd:1,qdr:y` " +
+            "(ordena por data no último ano) no Firecrawl e " +
+            "`search_recency_filter: \"year\"` no Sonar. NÃO é janela dura: " +
+            "prioriza o recente sem cegar o material evergreen. Ligado, também " +
+            "ativa o scrape das citações no fallback Sonar (mesma régua de " +
+            "conteúdo do Firecrawl). Só um booleano de verdade liga — qualquer " +
+            "outro valor cai em `false`.",
           security: ADMIN_SECURITY,
           requestBody: jsonBody(generateAutoInput),
           responses: {
@@ -427,6 +458,104 @@ export function buildOpenApiDocument(): Record<string, unknown> {
             }),
             "400": jsonResponse("Entrada inválida (ou última mensagem não é do usuário)."),
             "502": ERR.aiFailure,
+          },
+        },
+      },
+
+      // ------------------------------------------------------- Automação (cron)
+      "/api/cron/daily-article": {
+        get: {
+          tags: ["Automação (cron)"],
+          summary: "Publicação diária automática",
+          description:
+            "Acionada pelo Vercel Cron (`vercel.json`: `0 18 * * *` = 18:00 UTC " +
+            "= 15:00 BRT). Gera de tarde de propósito: o artigo é AGENDADO para " +
+            "as 09:00 BRT do dia seguinte (`publishAt` = 12:00 UTC de amanhã), " +
+            "deixando a noite como janela de veto humano.\n\n" +
+            "Fluxo: (1) autentica pelo Bearer; (2) IDEMPOTÊNCIA pelo SLOT — se " +
+            "já existe um `cron-daily` agendado para o slot de amanhã, devolve " +
+            "`skipped` sem recriar; (3) pede 5 pautas à IA, passando os títulos " +
+            "dos últimos 20 artigos para não repetir tema, e escolhe a primeira " +
+            "que não colide com o histórico; (4) gera o rascunho por tema com " +
+            "`recent` ligado (Firecrawl, com fallback para Sonar + scrape das " +
+            "citações); (5) aplica os portões de extensão e relevância — se " +
+            "falharem, mantém como draft e NÃO publica; (6) publica pelo MESMO " +
+            "portão da rota humana (`lib/publish`, regra “≥1 fonte válida”).\n\n" +
+            "GET sem efeito colateral seguro: NÃO é idempotente por natureza " +
+            "(cria artigo), mas o passo 2 garante que reexecuções da mesma " +
+            "rodada não dupliquem. É GET porque é o que o Vercel Cron dispara.",
+          security: [{ cronBearer: [] as string[] }],
+          responses: {
+            "200": jsonResponse(
+              "Três formatos possíveis, todos 200: `published: true` (criado, " +
+                "publicado e agendado), `skipped: true` (já havia artigo para o " +
+                "slot) ou `published: false` (criado como draft e NÃO publicado " +
+                "— texto curto, fora do tema, ou o portão barrou).",
+              {
+                type: "object",
+                properties: {
+                  published: { type: "boolean" },
+                  skipped: { type: "boolean" },
+                  reason: {
+                    type: "string",
+                    description:
+                      "`already-scheduled-for-slot` (skipped) ou o motivo de " +
+                      "não publicar: `too_short`, `off_topic`, `no_valid_source`.",
+                  },
+                  slot: { type: "string", description: "Slot de publicação (ISO)." },
+                  theme: { type: "string", description: "Pauta escolhida." },
+                  article: { type: "object" },
+                  diag: {
+                    type: "object",
+                    description: "Instrumentação ecoada para os logs do cron.",
+                    properties: {
+                      engine: {
+                        type: "string",
+                        enum: ["firecrawl", "sonar-scraped", "sonar-native"],
+                        description: "Por qual caminho as fontes vieram.",
+                      },
+                      sourceCount: { type: "integer" },
+                      words: { type: "integer" },
+                      sections: { type: "integer" },
+                      themeRepeat: {
+                        type: "boolean",
+                        description:
+                          "TODAS as pautas do dia colidiram com o histórico e o " +
+                          "cron seguiu com a menos parecida (tema forçado). " +
+                          "Sinal para olhar esse artigo na revisão.",
+                      },
+                      themeOverlap: {
+                        type: "number",
+                        description:
+                          "Sobreposição da pauta escolhida com o histórico (0–1). " +
+                          "Limiar de repetição: 0,35 (Jaccard sobre palavras " +
+                          "significativas — ver `lib/theme-overlap`).",
+                      },
+                      historyTitles: {
+                        type: "integer",
+                        description: "Quantos títulos entraram na comparação (até 20).",
+                      },
+                      ms: {
+                        type: "object",
+                        properties: {
+                          pauta: { type: "integer" },
+                          geracao: { type: "integer" },
+                          imagens: { type: "integer" },
+                          total: { type: "integer" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            ),
+            "401": jsonResponse("Segredo ausente ou errado."),
+            "500": jsonResponse("`CRON_SECRET` não configurada no ambiente."),
+            "502": jsonResponse(
+              "A pauta ou a geração da IA falhou — nada é criado. Inclui o " +
+                "`budget_exceeded`: o Firecrawl queimou o orçamento e o fallback " +
+                "Sonar não foi iniciado para não estourar os 60s da função.",
+            ),
           },
         },
       },

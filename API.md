@@ -37,7 +37,7 @@ Lista todos os artigos. Query opcional `status`.
 **Respostas:** `200` (array com sources) · `400` status inválido · `401`.
 
 ### `POST /api/articles`
-Cria um artigo manualmente. Nasce como `draft`. Aceita opcionalmente `category` (um slug da lista fixa: `logistica`, `atendimento`, `marketing`, `gestao`, `tecnologia`, `vendas`); qualquer outro valor é rejeitado pelo schema.
+Cria um artigo manualmente. Nasce como `draft`. Aceita opcionalmente `category` (um slug da lista fixa: `logistica`, `atendimento`, `marketing`, `gestao`, `tecnologia`, `vendas`); qualquer outro valor é rejeitado pelo schema. `publishAt` no passado é recusado com `400`: na criação não há valor anterior a preservar, então todo agendamento é novo e precisa ser futuro.
 **Respostas:** `201` · `400` · `401`.
 
 ### `GET /api/articles/[id]`
@@ -45,7 +45,8 @@ Retorna um artigo com suas fontes. `200` · `404` · `401`.
 
 ### `PATCH /api/articles/[id]`
 Edita um artigo. Aceita `draft`, `in_review`, `archived` — **não** aceita `published`. As fontes, se enviadas, substituem o conjunto atual. Aceita `publishAt` (agendamento), `category` (slug da lista fixa, ou `null` para limpar) e a seleção de imagem de capa; ao salvar, as imagens não usadas (nem capa, nem referenciadas no conteúdo) são removidas do Blob.
-**Respostas:** `200` · `400` (inclui tentativa de setar `published`) · `404` · `401`.
+**Agendamento no passado é recusado com `400`** — mas só quando o valor **muda**. Reenviar o `publishAt` já gravado (o caso de todo artigo do cron depois das 09:00, e o editor manda o payload completo em todo save) continua salvando normalmente; do contrário a trava impediria editar qualquer artigo antigo. A comparação usa o instante **do request** (não o do carregamento da tela), com 60s de tolerância para a granularidade de minuto do seletor.
+**Respostas:** `200` · `400` (inclui tentativa de setar `published` e novo `publishAt` no passado) · `404` · `401`.
 
 ### `DELETE /api/articles/[id]`
 Remove o artigo (fontes em cascata). `200` · `404` · `401`.
@@ -70,14 +71,15 @@ Geração **com fontes fornecidas** (tema + palavras-chave + URLs). Extrai o tex
 
 ### `POST /api/articles/generate-auto`
 Geração por **busca automática** (apenas o tema). Um **motor de busca** encontra as fontes na web; as URLs são filtradas contra concorrentes; o rascunho é ancorado nas fontes válidas. Também sugere `category` e gera 4 opções de imagem.
-**Corpo:** `{ "theme": "...", "keywords": ["..."], "searchEngine": "firecrawl"|"sonar", "textModel": "...", "imageModel": "..." }`
+**Corpo:** `{ "theme": "...", "keywords": ["..."], "searchEngine": "firecrawl"|"sonar", "recent": false, "textModel": "...", "imageModel": "..." }`
 - `searchEngine` (**opcional**, default `"firecrawl"`; valor inválido cai no default):
   - `"firecrawl"` — o Firecrawl (`POST /v2/search`, API direta) busca e traz o conteúdo em markdown; o **modelo de texto escolhido escreve** a partir dessas fontes.
   - `"sonar"` — o Perplexity Sonar busca e escreve nativamente (um modelo não-Sonar recebe o plugin `web` da OpenRouter).
   - **Fallback:** se o Firecrawl falhar (erro/limite/timeout) ou não sobrar fonte não-concorrente, cai automaticamente no Sonar.
+- `recent` (**opcional**, default `false`) — preferência por conteúdo recente na busca. É o **mesmo parâmetro** que o cron liga fixo, exposto no painel como o toggle "Priorizar conteúdo recente". Vale para os **dois motores**, traduzido em `lib/recency`: `sbd:1,qdr:y` (ordena por data dentro do último ano) no Firecrawl e `search_recency_filter: "year"` no Sonar. **Não é janela dura** — prioriza o recente sem cegar a busca para material evergreen (a janela dura de 6 meses foi aposentada justamente por isso). Ligado, também ativa o **scrape das citações** no fallback Sonar (ver abaixo). Default desligado de propósito: no painel quem escolhe o tema é uma pessoa — tema noticioso, liga; tema atemporal, deixa desligado. Só um booleano de verdade liga; qualquer outro valor (string, número, `null`) cai em `false`.
 - `textModel` é validado **conforme o motor**: com `firecrawl`, contra a lista **ampla** (qualquer modelo, inclusive lite — só escreve); com `sonar`, contra a lista **robusta** (um "lite" é descartado e cai no default robusto). `imageModel` é validado contra a lista de imagem. Um id inválido/ausente cai no default do ambiente.
 
-As quatro proteções (filtro de concorrentes, `SYSTEM_PROMPT` completo, limpeza determinística da saída, portão `422`) valem nos dois motores — o Firecrawl só substitui a etapa de busca. As fontes do Firecrawl passam por filtros de qualidade (ver `lib/relevance`): **descarte de índices** (home/listagem `/blog`, `/noticias`, ou página com centenas de links), **relevância** por conteúdo (off-topic como poliéster/portos é cortado), **idioma** (fonte não-portuguesa é descartada — espanhol vazava termos pro texto), e **host/ano** (redes sociais + dumps de documento tipo Scribd via `-site:`; URL com ano antigo). O LinkedIn fica de fora das exclusões de host, mas `/pulse/` e `/posts/` (conteúdo aberto, não-editorial) são descartados por path. No **fallback do cron**, as citações do Sonar não ficam só no filtro por URL: são **scrapeadas** pelo extrator próprio (linkedom, sem custo de crédito) e passam pela **mesma régua de conteúdo** do Firecrawl (idioma inclusive), e então o nosso modelo reescreve — paridade de qualidade. Se o scrape render menos de 1 fonte limpa, cai na escrita nativa do Sonar (rede de segurança). Além disso, o prompt de escrita recebe a **data de hoje** (o modelo não sabe que dia é), para não tratar evento passado como planejamento futuro.
+As quatro proteções (filtro de concorrentes, `SYSTEM_PROMPT` completo, limpeza determinística da saída, portão `422`) valem nos dois motores — o Firecrawl só substitui a etapa de busca. As fontes do Firecrawl passam por filtros de qualidade (ver `lib/relevance`): **descarte de índices** (home/listagem `/blog`, `/noticias`, ou página com centenas de links), **relevância** por conteúdo (off-topic como poliéster/portos é cortado), **idioma** (fonte não-portuguesa é descartada: o detector compara marcadores de pt × es × **en** e exige português majoritário, com um piso de evidência em texto longo para pegar idiomas fora da lista), e **host/ano** (redes sociais + dumps de documento tipo Scribd via `-site:`; URL com ano antigo). O LinkedIn fica de fora das exclusões de host, mas `/pulse/` e `/posts/` (conteúdo aberto, não-editorial) são descartados por path. Quando `recent` está ligado (sempre no cron, opcional no painel), as citações do Sonar não ficam só no filtro por URL no **fallback**: são **scrapeadas** pelo extrator próprio (linkedom, sem custo de crédito) e passam pela **mesma régua de conteúdo** do Firecrawl (idioma inclusive), e então o nosso modelo reescreve — paridade de qualidade. O acoplamento é intencional: quem pede recência quer fonte boa, e o scrape é o que garante isso no Sonar. Se o scrape render menos de 1 fonte limpa, cai na escrita nativa do Sonar (rede de segurança). Além disso, o prompt de escrita recebe a **data de hoje** (o modelo não sabe que dia é), para não tratar evento passado como planejamento futuro.
 **Portões de qualidade:** (a) **extensão** — artigo de verdade (≥3 seções `##`, ≥250 palavras); abaixo disso, `422 { code: "ARTICLE_TOO_SHORT" }`. (b) **relevância** — ao menos uma fonte com sinal do nicho; senão `422 { code: "ARTICLE_OFF_TOPIC" }`. Ambos são variação da busca/modelo; gerar de novo costuma resolver.
 **Respostas:** `201` · `422` sem fonte válida, `ARTICLE_TOO_SHORT` ou `ARTICLE_OFF_TOPIC` · `400` · `401` · `502`.
 
@@ -94,9 +96,16 @@ Lista **curada** de modelos da OpenRouter para os seletores de geração (cachea
 ## Sugestão de pautas (admin)
 
 ### `POST /api/ideas`
-Sugere ~5 **títulos** de artigos no nicho da Kanglu, opcionalmente focados num tema. Não cria nada — as pautas são efêmeras no cliente.
-**Corpo:** `{ "theme": "..." }` (`theme` opcional, vazio → pautas gerais).
-**Respostas:** `200` `{ "ideas": ["...", "..."] }` · `400` · `401` · `502` (falha da IA, com fallback amigável).
+Sugere ~5 **pautas** no nicho da Kanglu, opcionalmente focadas num tema. Cada pauta vem com o título **e 3–5 palavras-chave** do nicho, relevantes àquele título — usadas para pré-preencher o campo de palavras-chave do gerador por tema (ajudam na busca de fontes e no SEO). Não cria nada — as pautas são efêmeras no cliente.
+**Corpo:** `{ "theme": "..." }` (`theme` opcional, vazio → pautas gerais; máx. 200 caracteres).
+**Resposta `200`:**
+```json
+{ "ideas": [ { "title": "Como reduzir prazos de entrega", "keywords": ["prazo de entrega", "logística", "frete"] } ] }
+```
+Pauta sem palavras-chave aproveitáveis vem com `keywords: []` (não quebra o cliente).
+**Demais respostas:** `400` · `401` · `502` (falha da IA, com fallback amigável).
+
+> O parâmetro `avoidTitles` de `lib/ideas` (histórico para não repetir tema) **não** é exposto nesta rota — só o cron o usa. No painel quem filtra repetição é o humano, que vê a lista de artigos ao lado.
 
 ---
 
@@ -106,11 +115,18 @@ Sugere ~5 **títulos** de artigos no nicho da Kanglu, opcionalmente focados num 
 **Publicação diária automática.** Acionada pelo **Vercel Cron** (agendado em `vercel.json`: `0 18 * * *` = 18:00 UTC = **15:00 BRT**). Gera de tarde de propósito: o artigo só vai ao ar às 09:00 BRT do **dia seguinte**, deixando a noite inteira como janela de veto humano. Faz o fluxo ponta a ponta sem intervenção:
 1. **Autentica** o cron pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta. Sem a env `CRON_SECRET` a rota responde `500` (desabilitada de propósito, para não ficar aberta ao mundo).
 2. **Idempotência pelo slot de publicação:** se já existe um artigo `createdVia = "cron-daily"` **agendado para o slot de amanhã** (`publishAt` = 12:00 UTC do dia seguinte), devolve `skipped` sem recriar — reexecuções/retentativas da mesma rodada não duplicam. A chave é o horário de publicação, não o dia de criação.
-3. Pede **uma pauta** à IA ancorada no **momento atual** (a data de hoje é injetada no prompt; pautas atemporais são desencorajadas), gera o rascunho por tema com **preferência por conteúdo recente** — não janela dura: `sbd:1,qdr:y` (sort-by-date, último ano) no Firecrawl e `search_recency_filter: "year"` no fallback Sonar. Janela dura de meses cegava a busca para temas evergreen (pós-venda); a preferência por data mantém o recente na frente sem perder o evergreen bom. Marcado `createdVia: "cron-daily"`.
+3. Pede **5 pautas** à IA ancoradas no **momento atual** (a data de hoje é injetada no prompt; pautas atemporais são desencorajadas) e escolhe **uma que não repita o histórico** (ver abaixo). Gera o rascunho por tema com **preferência por conteúdo recente** — não janela dura: `sbd:1,qdr:y` (sort-by-date, último ano) no Firecrawl e `search_recency_filter: "year"` no fallback Sonar. Janela dura de meses cegava a busca para temas evergreen (pós-venda); a preferência por data mantém o recente na frente sem perder o evergreen bom. Marcado `createdVia: "cron-daily"`.
 4. Aplica o **piso de extensão** (≥3 seções, ≥250 palavras). Sem humano para vetar um parágrafo, o cron **re-escreve 1×** se vier curto; se persistir, **mantém como draft e NÃO publica** (melhor nenhum artigo que um snippet).
 5. Se passou no piso, **publica pelo mesmo portão** de `POST /api/articles/[id]/publish` (regra "≥1 fonte válida" = mesma função `lib/publish`), **agendado** para `publishAt` = 12:00 UTC do dia seguinte (09:00 BRT): fica `published`, mas só aparece no blog na manhã seguinte.
 
-**Orçamento de tempo (60s):** a busca do Firecrawl tem timeout **curto (12s)** — medido p50 ~7s; um teto alto gastava metade do orçamento antes do fallback. Se o Firecrawl falhar e já tiver passado de **35s** do início, o fallback Sonar **não é iniciado** (`budget_exceeded` → "hoje não deu") para não morrer no meio (a Vercel mata a função sem retry nem alerta). Toda resposta traz um `diag`: `engine` (`firecrawl` / `sonar-scraped` / `sonar-native` — qual qualidade foi ao ar), `sourceCount`, `words`, `sections` e `ms` (`pauta`/`geracao`/`imagens`/`total`) — para caçar estouros de tempo e saber por qual caminho o artigo passou.
+**Antirrepetição de pauta.** A idempotência do slot impede dois artigos no mesmo dia, mas não impedia a **mesma pauta** voltar em dias diferentes (o modelo não tem memória entre execuções e convergia para os assuntos óbvios do nicho). Duas camadas, sem chamada extra à IA:
+
+1. **No prompt** — os títulos dos **últimos 20 artigos** (publicados, agendados, ou rascunhos do próprio cron) vão junto do pedido, com instrução de mudar o **ângulo**, não de proibir o assunto: proibir contradiria o pedido de sazonalidade do `recent`, e o modelo obedeceria um dos dois ao acaso. Custo medido: **+487 tokens** de input na chamada de pauta, que é a mais barata do pipeline.
+2. **No pós-filtro** (`lib/theme-overlap`) — as 5 pautas já vieram na mesma resposta, então o cron percorre **na ordem do modelo** e usa a primeira cuja sobreposição com o histórico fique abaixo de **0,35**. A comparação é por **conjunto de palavras significativas** (sem stopwords, sem acento, sem plural, com raiz aproximada e sinônimos do nicho canonizados), via índice de Jaccard — comparar título exato não pegaria "logística do 2º semestre" × "prepare a logística para o segundo semestre". O limiar foi calibrado sobre 22 pares reais: duplicados pontuam 0,60–1,00 e distintos 0,00–0,20, com a faixa entre 0,20 e 0,60 vazia.
+
+Se **todas** as 5 colidirem, o cron **não fica sem artigo**: usa a de **menor** sobreposição e marca `diag.themeRepeat: true` (+ um `console.warn`) para a revisão humana da noite saber que o dia foi de tema forçado.
+
+**Orçamento de tempo (60s):** a busca do Firecrawl tem timeout **curto (12s)** — medido p50 ~7s; um teto alto gastava metade do orçamento antes do fallback. Se o Firecrawl falhar e já tiver passado de **35s** do início, o fallback Sonar **não é iniciado** (`budget_exceeded` → "hoje não deu") para não morrer no meio (a Vercel mata a função sem retry nem alerta). Toda resposta traz um `diag`: `engine` (`firecrawl` / `sonar-scraped` / `sonar-native` — qual qualidade foi ao ar), `sourceCount`, `words`, `sections`, `ms` (`pauta`/`geracao`/`imagens`/`total`) e os campos de antirrepetição — `themeRepeat` (booleano; `true` = tema forçado), `themeOverlap` (0–1, sobreposição da pauta escolhida — útil mesmo sem repetição, para ver de longe se o modelo está convergindo) e `historyTitles` (quantos títulos entraram na comparação). Serve para caçar estouros de tempo e saber por qual caminho o artigo passou.
 
 **Respostas:**
 - `200` `{ "published": true, "theme": "...", "article": { ..., "publishAt": "<amanhã>T12:00:00Z" }, "diag": {...} }` — criado, publicado e agendado.
@@ -134,6 +150,8 @@ Público (sem auth). Recebe o histórico da conversa e responde dúvidas sobre o
 ## Rotas públicas (blog) — sem autenticação
 
 Servem apenas artigos `published` e visíveis (respeitando o agendamento `publishAt`).
+
+**Data exibida:** a data que aparece no card, no cabeçalho do artigo, no JSON-LD (`datePublished`), no `og:published_time` e no `lastmod` do sitemap é a data em que o artigo **ficou público** — o mais tarde entre `publishedAt` (quando foi aprovado) e `publishAt` (quando ficou visível). Para o artigo do cron, gerado às 15h e agendado para as 09h do dia seguinte, isso é o **dia seguinte**; para uma publicação imediata (sem agendamento), é o próprio momento da publicação.
 
 ### `GET /`
 Home (landing): hero, seção de recursos e os **3 últimos artigos publicados** (lidos do banco, revalidados). SSR/ISR.

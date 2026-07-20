@@ -94,7 +94,8 @@ Em ambos, o rascunho nasce como assistido por IA e é **revisado pelo autor** an
 
 O `generate-auto` tem um **seletor de motor de busca**, com dois caminhos:
 
-- **Firecrawl** (padrão): busca as fontes via **API direta** (`POST /v2/search`, timeout curto de **12s**) e traz o conteúdo de cada página em **markdown**. Ruído (Instagram/YouTube/TikTok + dumps de documento tipo Scribd) sai na query (`-site:`); o LinkedIn é preservado como host, mas `/pulse/` e `/posts/` (conteúdo aberto, não-editorial) são cortados por path. As fontes passam por **descarte de índices**, **relevância por conteúdo** (off-topic como poliéster/portos é cortado), **idioma** (fonte não-portuguesa descartada — espanhol vazava termos) e **host/ano antigo** (ver `lib/relevance`). O sistema filtra concorrentes e o **modelo escolhido escreve** a partir do que sobrou.
+- **Firecrawl** (padrão): busca as fontes via **API direta** (`POST /v2/search`, timeout curto de **12s**) e traz o conteúdo de cada página em **markdown**. Ruído (Instagram/YouTube/TikTok + dumps de documento tipo Scribd) sai na query (`-site:`); o LinkedIn é preservado como host, mas `/pulse/` e `/posts/` (conteúdo aberto, não-editorial) são cortados por path. As fontes passam por **descarte de índices**, **relevância por conteúdo** (off-topic como poliéster/portos é cortado), **idioma** (fonte não-portuguesa descartada: o detector compara marcadores de pt × es × **inglês** e exige português majoritário — espanhol vazava termos, e um blog em inglês passava batido por não ser comparado com nada) e **host/ano antigo** (ver `lib/relevance`). O sistema filtra concorrentes e o **modelo escolhido escreve** a partir do que sobrou.
+- **Priorizar conteúdo recente** (toggle, **desligado por padrão**): liga o mesmo parâmetro `recent` que o cron usa fixo — ordena por data dentro do último ano nos dois motores (`lib/recency`). **Não é janela dura**: prioriza o recente sem cegar a busca para o material evergreen, que costuma ser o melhor em temas atemporais (pós-venda, fidelização). Desligado por padrão porque no painel quem escolhe o tema é uma pessoa: tema noticioso, liga; tema atemporal, deixa desligado. Validado no servidor — o cliente não decide sozinho.
 - **Sonar**: o Perplexity Sonar **busca e escreve nativamente** (e um modelo não-Sonar recebe o plugin `web` da OpenRouter para buscar). É o comportamento original, mantido como opção.
 - **Fallback automático**: se o Firecrawl falhar (erro, limite de crédito, timeout de 12s) **ou** não sobrar fonte, a busca cai no **Sonar**. No cron, o fallback busca com o Sonar mas **scrapeia as citações** com o extrator próprio (linkedom, sem crédito) e aplica a **mesma régua de conteúdo** do Firecrawl (idioma/relevância/índice), reescrevendo com o nosso modelo — assim, quando o crédito do Firecrawl acaba (a partir do ~dia 20), o Sonar vira o caminho único mas com **qualidade equivalente**. Se o scrape render pouco, usa a escrita nativa do Sonar (rede de segurança). Uma **guarda de orçamento** não inicia o fallback se já passou de 35s (não estoura os 60s). O `diag` registra qual caminho rodou (`firecrawl`/`sonar-scraped`/`sonar-native`).
 
@@ -115,7 +116,7 @@ Além do [`API.md`](./API.md) — referência estática, legível direto no GitH
 
 ### Sugestão de pautas
 
-Em `/admin/ideas`, a IA sugere ~5 **títulos** de artigos no nicho da Kanglu (opcionalmente focados num tema informado). As pautas são efêmeras (não gravam nada); a escolhida abre já no gerador por tema. Endpoint: `POST /api/ideas`.
+Em `/admin/ideas`, a IA sugere ~5 **pautas** no nicho da Kanglu (opcionalmente focadas num tema informado). Cada pauta vem com o título **e 3–5 palavras-chave** relevantes àquele título; ao escolher uma, o gerador por tema abre com **tema e palavras-chave já preenchidos** — as keywords ajudam na busca de fontes e no SEO, e continuam editáveis. As pautas são efêmeras (não gravam nada). Endpoint: `POST /api/ideas`.
 
 ### Regenerar rascunho
 
@@ -129,9 +130,15 @@ Ao gerar um artigo, o sistema já cria **4 opções de imagem de capa** (Nano Ba
 
 Um artigo pode ser agendado para aparecer no blog em uma data/hora futura (`publishAt`). Enquanto agendado, fica publicado mas invisível no blog, com um selo "Agendado" no painel; aparece automaticamente quando a hora chega (filtro na query pública, sem cron).
 
+**Não dá para agendar no passado.** O seletor desabilita dias anteriores a hoje e, em hoje, os horários já passados; e o servidor revalida no instante do request (o cliente nunca decide). A trava vale para **definir** um agendamento, não para ter um: reenviar o `publishAt` já gravado continua salvando — sem isso, todo artigo do cron viraria ineditável depois das 09:00, já que o editor manda o payload completo em cada save.
+
+**A data exibida é a data em que o artigo ficou público**, não a da aprovação: o mais tarde entre `publishedAt` e `publishAt`. O artigo do cron é gerado às 15h e agendado para as 09h do dia seguinte — o blog mostra o dia seguinte, que é quando ele existiu para o leitor. A regra vale nos cinco lugares que exibem data (card da listagem, cabeçalho do artigo, JSON-LD `datePublished`, `og:published_time` e `lastmod` do sitemap), e a publicação imediata continua com a data da publicação.
+
 ### Publicação diária automática (cron)
 
 Um **Vercel Cron** (`vercel.json`, `0 18 * * *` = 18:00 UTC = **15:00 BRT**) chama `GET /api/cron/daily-article` todo dia: a IA escolhe uma pauta **ancorada no momento atual** (a data de hoje entra no prompt), gera o rascunho por tema com **preferência por conteúdo recente** (sort-by-date no último ano nos dois motores — não janela dura, que cegava temas evergreen) e o publica **pelo mesmo portão** da rota humana, **agendado** para aparecer às 09:00 BRT do **dia seguinte** (`publishAt` = 12:00 UTC de amanhã). Gerar de tarde é intencional: deixa a noite inteira como **janela de veto** antes de o texto ir ao ar. É **idempotente pelo slot de publicação** — não recria se já houver um `cron-daily` agendado para o slot de amanhã — e **autenticado** pelo header `Authorization: Bearer <CRON_SECRET>` que a Vercel injeta.
+
+**Antirrepetição de pauta.** A idempotência do slot impede dois artigos no mesmo dia, mas não impedia a mesma **pauta** voltar em dias diferentes — o modelo não tem memória entre execuções e converge para os assuntos óbvios do nicho, acumulando artigos quase idênticos ao longo da semana. Duas camadas, **sem chamada extra à IA**: (1) os títulos dos **últimos 20 artigos** entram no prompt, pedindo outro **ângulo** (proibir o assunto contradiria o pedido de sazonalidade do `recent`); (2) o cron pede 5 pautas — já vinham na mesma resposta — e usa a primeira cuja **sobreposição** com o histórico fique abaixo de 0,35, comparando conjuntos de palavras significativas por Jaccard (`lib/theme-overlap`), não título exato: "logística do 2º semestre" e "prepare a logística para o segundo semestre" são o mesmo artigo. Se **todas** colidirem, usa a de menor sobreposição e marca `diag.themeRepeat` — nunca fica sem artigo do dia, mas o dia sai sinalizado para a revisão.
 
 Como não há humano para vetar um texto ruim, o cron aplica dois **portões de qualidade**: **extensão** (≥3 seções, ≥250 palavras — se vier parágrafo/snippet, **re-escreve 1×** e, persistindo, mantém como **draft sem publicar**) e **relevância** (ao menos uma fonte do nicho — senão não publica). A regra de publicação (`lib/publish`) e a geração (`lib/generate-article`) são compartilhadas com o fluxo do painel (que rejeita curto/off-topic com `422`), num único lugar cada.
 
@@ -197,7 +204,7 @@ Usa **linkedom** em vez de jsdom, que quebra no serverless da Vercel (ERR_REQUIR
 
 ### Filtro de concorrentes
 
-Na busca automática, as URLs passam por `src/lib/competitors.ts` (lista editável). Concorrentes e players adjacentes (rastreamento, pagamento, plataformas de e-commerce) são descartados por domínio real. Se nenhuma fonte não-concorrente sobra, o sistema não gera (422). Como a busca é da web aberta, o filtro reduz mas não elimina — a revisão humana é a garantia final.
+Na busca automática, as URLs passam por `src/lib/competitors.ts` (lista editável). Concorrentes e players adjacentes (rastreamento, gestão de fretes, **gateways de pagamento nacionais e internacionais que operam no Brasil**, plataformas de e-commerce) são descartados por domínio real — o matcher pega o domínio e seus subdomínios, mas não marcas parecidas. O critério é o **serviço**, não a bandeira do CNPJ: um gateway estrangeiro atendendo lojista brasileiro é tão concorrente-adjacente quanto um nacional. Se nenhuma fonte não-concorrente sobra, o sistema não gera (422). Como a busca é da web aberta, o filtro reduz mas não elimina — a revisão humana é a garantia final.
 
 ### Imagens no Vercel Blob
 
@@ -256,7 +263,8 @@ src/
     prisma, auth, validation, api-schemas, openapi, extract, ai, image,
     article-image, body-images, web-sources, firecrawl, competitors, chat,
     public-articles, site, categories, models, ideas, reading-time,
-    json-extract, toc, publish, generate-article, recency, relevance
+    json-extract, toc, publish, generate-article, recency, relevance,
+    schedule, article-date, theme-overlap
   proxy.ts                           # proteção das rotas /admin
 vercel.json                          # agenda do cron diário (Vercel Cron)
 API.md                               # documentação das rotas
