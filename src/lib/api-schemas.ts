@@ -50,6 +50,13 @@ export const generateAutoInput = z.object({
   // e escreve nativamente (fluxo original). Valor inválido/ausente cai no padrão
   // (Firecrawl) — mesma filosofia leniente do seletor de modelo.
   searchEngine: z.enum(["firecrawl", "sonar"]).default("firecrawl").catch("firecrawl"),
+  // Preferência por conteúdo recente na busca. Mesmo parâmetro que o cron liga
+  // fixo — aqui vira escolha do editor, tema a tema.
+  //
+  // DEFAULT FALSE, e o `.catch` reforça: corpo ausente, campo omitido ou lixo no
+  // lugar do booleano caem em desligado. É o comportamento atual do painel, que
+  // não muda para quem chama a API sem o campo novo.
+  recent: z.boolean().default(false).catch(false),
 });
 
 /**

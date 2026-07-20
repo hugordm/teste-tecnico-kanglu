@@ -14,6 +14,7 @@ import {
   ModelSelect,
   ModelSelectSkeleton,
   EngineSelect,
+  RecencyToggle,
   type SearchEngine,
 } from "../_components/model-select";
 import type { AdminArticle } from "../_lib/types";
@@ -60,6 +61,12 @@ function GenerateAutoForm() {
   // escreve nativamente (é também o fallback). A escolha é validada no servidor.
   const [engine, setEngine] = useState<SearchEngine>("firecrawl");
 
+  // Recência da busca — MESMO parâmetro `recent` que o cron liga fixo. Começa
+  // DESLIGADO: aqui há um humano escolhendo o tema, e priorizar data em tema
+  // atemporal esconde o material evergreen bom. Tema noticioso, o editor liga.
+  // Vai no corpo do POST e é revalidado no servidor (generateAutoInput).
+  const [recent, setRecent] = useState(false);
+
   // O seletor de MODELO DE TEXTO se adapta ao MOTOR: Firecrawl mostra a lista
   // COMPLETA (inclui lite — o modelo só escreve); Sonar mostra a lista ROBUSTA
   // (sem lite — o modelo não-Sonar precisa acionar o plugin web). Default idem.
@@ -101,6 +108,7 @@ function GenerateAutoForm() {
             theme: theme.trim(),
             ...(cleanKeywords.length ? { keywords: cleanKeywords } : {}),
             searchEngine: engine,
+            recent,
             ...(effTextModel ? { textModel: effTextModel } : {}),
             ...(effImageModel ? { imageModel: effImageModel } : {}),
           },
@@ -185,6 +193,15 @@ function GenerateAutoForm() {
           <EngineSelect
             value={engine}
             onChange={handleEngineChange}
+            disabled={loading}
+          />
+
+          {/* Recência: vale para os DOIS motores — o servidor traduz o mesmo
+              `recent` no filtro de cada um (lib/recency), inclusive quando o
+              Firecrawl falha e cai no fallback Sonar. */}
+          <RecencyToggle
+            value={recent}
+            onChange={setRecent}
             disabled={loading}
           />
 

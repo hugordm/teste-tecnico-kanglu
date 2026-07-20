@@ -42,7 +42,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const { theme, keywords, searchEngine, textModel, imageModel } = parsed.data;
+  // `recent` vem do toggle da tela, mas quem decide é o schema: só um booleano
+  // de verdade liga a recência (ver generateAutoInput). O cliente não é fonte de
+  // verdade — se mandar "true" como string, ou nada, sai desligado.
+  const { theme, keywords, searchEngine, textModel, imageModel, recent } =
+    parsed.data;
 
   const outcome = await generateAutoArticle({
     theme,
@@ -50,6 +54,10 @@ export async function POST(req: Request) {
     searchEngine,
     textModel,
     imageModel,
+    // MESMO parâmetro do cron: daqui pra baixo os dois caminhos são idênticos.
+    // A tradução para cada motor (tbs do Firecrawl, search_recency do Sonar)
+    // continua só em lib/recency — nada de recência é reimplementado aqui.
+    recent,
   });
 
   if (!outcome.ok) {
