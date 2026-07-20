@@ -44,3 +44,6 @@ next-env.d.ts
 # generated / local artifacts
 /src/generated/prisma
 cookies.txt
+
+# config local do agente (Claude Code)
+.claude/
