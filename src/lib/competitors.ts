@@ -47,6 +47,19 @@ export const COMPETITOR_DOMAINS: string[] = [
   "stripe.com",
   "iugu.com",
   "pagbrasil.com",
+  // Gateways INTERNACIONAIS que operam no Brasil. Mesma categoria da Cielo/
+  // Getnet/PagSeguro que já estavam aqui — o que define a exclusão é o serviço
+  // (pagamento/checkout no e-commerce brasileiro), não a bandeira do CNPJ.
+  // A Adyen escapou num artigo de frete só por não estar na lista.
+  "adyen.com",
+  "paypal.com",
+  "paypal.com.br", // domínio próprio: o sufixo de "paypal.com" NÃO o alcança
+  "braintreepayments.com", // gateway do grupo PayPal
+  "dlocal.com", // cross-border LatAm, forte no Brasil
+  "checkout.com",
+  "nuvei.com",
+  "worldpay.com",
+  "rapyd.net",
   "prax.ai",
   "yavdigital.com",
   "base.com",
@@ -62,6 +75,13 @@ export const COMPETITOR_DOMAINS: string[] = [
   "vindi.com.br",
   "appmax.com.br",
   "yapay.com.br",
+  // Adquirentes/subadquirentes nacionais que faltavam na mesma categoria da
+  // Cielo/Rede/Getnet — achados ao revisar a lista por causa da Adyen.
+  "stone.com.br",
+  "stone.co",
+  "sumup.com.br",
+  "infinitepay.io",
+  "asaas.com",
 
   // E-commerce / lojas / marketplaces
   "shopify.com",

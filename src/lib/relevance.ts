@@ -183,16 +183,69 @@ export function hasStaleYearInUrl(url: string): boolean {
 const ES_MARKERS =
   /ción|ñ| el | los | las | con | una | más | también | según | hacia | pero | hacía /g;
 const PT_MARKERS = /ção|ções| não | você | com | uma | mais | então | há |[ãõ]/g;
+// INGLÊS. Faltava: o detector só comparava pt×es, então um blog em inglês
+// pontuava ~0 dos dois lados, caía no "na dúvida deixa passar" e entrava como
+// fonte (foi assim que o flevy.com — consultoria em inglês — passou).
+// Só palavras-função de altíssima frequência, que aparecem em QUALQUER texto
+// inglês e quase nunca em português corrido. "in"/"a"/"no" ficam de fora de
+// propósito: existem nos dois idiomas e envenenariam a contagem.
+const EN_MARKERS =
+  / the | and | of | to | for | with | is | are | that | this | your | you | from | have | will | can /g;
 
 /**
- * O texto é provavelmente português? Conta marcadores fortes de cada idioma; na
- * dúvida (empate/texto curto), assume PT — filosofia "na dúvida deixa passar".
+ * Nº de marcadores de cada idioma no texto. Espaços normalizados e o texto
+ * envolto em espaços para que os marcadores com borda casem na 1ª/última
+ * palavra. NÃO remove acento — o acento (ção vs ción, ã) É o sinal.
+ */
+function languageMarkerCounts(text: string) {
+  const t = ` ${text.toLowerCase().replace(/\s+/g, " ")} `;
+  return {
+    text: t,
+    pt: (t.match(PT_MARKERS) || []).length,
+    es: (t.match(ES_MARKERS) || []).length,
+    en: (t.match(EN_MARKERS) || []).length,
+  };
+}
+
+/**
+ * Comprimento a partir do qual exigimos presença POSITIVA de português.
+ * Abaixo disso o texto é curto demais para acusar ausência de marcador (uma
+ * legenda, um resumo de duas linhas), e continua valendo o "na dúvida deixa
+ * passar". Fonte real scrapeada tem milhares de caracteres.
+ */
+const LANG_MIN_CHARS_FOR_EVIDENCE = 1200;
+
+/**
+ * Mínimo de marcadores PT num texto longo. Medido: fonte PT de verdade pontua
+ * 70+; fonte ES pontuava pt=3. O piso de 3 é deliberadamente baixo — não é para
+ * medir "quão português", é para rejeitar texto longo com ZERO português (um
+ * idioma que nem listamos, como francês ou alemão).
+ */
+const LANG_MIN_PT_MARKERS = 3;
+
+/**
+ * O texto é provavelmente português? Compara os marcadores de PT com os dos
+ * idiomas que já vazaram (espanhol) ou podem vazar (inglês), e exige que o
+ * português seja MAJORITÁRIO — não basta empatar com o inglês.
+ *
+ * Três regras, em ordem:
+ *   1. pt < es  → não é português (regra original, mantida).
+ *   2. pt < en  → não é português (a que faltava: pega o blog em inglês).
+ *   3. texto longo com quase nenhum marcador PT → não é português (backstop
+ *      para idiomas fora da lista; não precisamos enumerar todos).
+ *
+ * Continua "na dúvida deixa passar" para texto curto: ali a ausência de sinal
+ * não é evidência. O que mudou é que texto longo agora precisa PROVAR que é
+ * português, em vez de só não parecer espanhol.
  */
 export function isLikelyPortuguese(text: string): boolean {
-  const t = ` ${text.toLowerCase().replace(/\s+/g, " ")} `;
-  const es = (t.match(ES_MARKERS) || []).length;
-  const pt = (t.match(PT_MARKERS) || []).length;
-  return pt >= es;
+  const { text: t, pt, es, en } = languageMarkerCounts(text);
+  if (pt < es) return false;
+  if (pt < en) return false;
+  if (t.length >= LANG_MIN_CHARS_FOR_EVIDENCE && pt < LANG_MIN_PT_MARKERS) {
+    return false;
+  }
+  return true;
 }
 
 /** Nº de termos DISTINTOS do nicho presentes no texto. */
