@@ -23,6 +23,7 @@ export const COMPETITOR_DOMAINS: string[] = [
   "kangu.com.br",
   "freterapido.com",
   "freterapido.com.br",
+  "meufrete.net.br", // cotação de frete, mesma categoria — escapou como fonte
   "mandae.com.br",
   "muambator.com.br",
   "17track.net",
